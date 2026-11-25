@@ -45,14 +45,26 @@ async def main():
   await page.get_by_label('Default classification',exact=True).select_option('companion')
   await page.get_by_label('First horizontal position',exact=True).fill('900')
   await page.get_by_label('Vertical position',exact=True).fill('400')
-  await page.get_by_role('button',name='Apply defaults to selected sessions',exact=True).click()
+  # Defaults apply immediately; one session gets a separate individual destination.
+  assert await page.get_by_label('World for First Session',exact=True).input_value()==await page.evaluate('window.getData().planets[1].id')
+  first_world=await page.evaluate('window.getData().planets[0].id')
+  await page.get_by_label('World for Second Session',exact=True).select_option(first_world)
+  row_two=page.locator('[data-row="1"]')
+  await row_two.get_by_label('X',exact=True).fill('1700')
+  await page.get_by_label('Default classification',exact=True).select_option('adventure')
+  await page.get_by_label('Default classification',exact=True).select_option('companion')
+  assert await page.get_by_label('World for Second Session',exact=True).input_value()==first_world
+  await page.locator('[data-row="1"] [name=x-1]').evaluate("el=>el.value='1750'")
   await page.get_by_role('button',name='Save',exact=True).click()
-  await page.wait_for_function('window.getData().planets[1].events.length===3')
+  await page.wait_for_function('window.getData().planets[1].events.length===2')
   data=await page.evaluate('window.getData()');quest=data['planets'][1]['events'][1]
   assert quest['x']==900 and quest['y']==400 and quest['type']=='companion'
   assert quest['parentChapter']==data['planets'][1]['events'][0]['id']
   assert 'Extra detailed campaign notes.' in quest['description'] and 'A surprise revelation.' in quest['description']
   assert 'mock-pairing-token' not in json.dumps(data)
+  assert data['planets'][0]['events'][-1]['source']['sessionId']=='s2'
+  assert data['planets'][0]['events'][-1]['x']==1750
+  assert data['planets'][0]['events'][-1]['parentChapter']==''
   # Rich notes, inline image insertion, local artwork, then resync.
   await page.get_by_role('combobox',name='Planet',exact=True).select_option(label='Second World')
   await page.get_by_role('button',name='Arc One',exact=True).click()
@@ -78,8 +90,35 @@ async def main():
   await page.get_by_role('button',name='Resync',exact=True).click()
   await page.locator('.fa-error').filter(has_text='Source temporarily unavailable').wait_for()
   assert await page.evaluate('window.getData().revision')==before
-  # Players cannot see importer or pairing controls.
+  # Linked-note manager locates off-screen notes and repairs an existing import without duplicates.
   await page.locator('.fa-dialog').get_by_role('button',name='Close',exact=True).click()
+  await page.get_by_role('button',name='Linked notes',exact=True).click()
+  await page.get_by_role('button',name='Locate Second Session',exact=True).click()
+  assert await page.get_by_role('combobox',name='Planet',exact=True).input_value()==first_world
+  await page.locator('.fa-detail h2').filter(has_text='Second Session').wait_for()
+  card=page.get_by_role('button',name='Second Session',exact=True)
+  bounds=await card.bounding_box();viewport=await page.locator('.fa-viewport').bounding_box()
+  assert bounds['x']>=viewport['x'] and bounds['x']+bounds['width']<=viewport['x']+viewport['width']
+  await page.get_by_role('button',name='Linked notes',exact=True).click()
+  await page.get_by_label('World for First Session revised',exact=True).select_option(first_world)
+  before_move=await page.evaluate('window.getData().planets[1].events[1]')
+  await page.get_by_role('button',name='Save',exact=True).click()
+  await page.wait_for_function('window.getData().planets[1].events.length===1')
+  moved=await page.evaluate('window.getData().planets[0].events.find(e=>e.source?.sessionId==="s1")')
+  assert moved['id']==before_move['id'] and moved['description']==before_move['description'] and moved['picture']==before_move['picture']
+  assert moved['source']==before_move['source'] and moved['parentChapter']==''
+  assert await page.evaluate('window.getData().planets.flatMap(p=>p.events).filter(e=>e.source).length')==2
+  # A fresh import identifies actual saved worlds and does not offer editable duplicate placement.
+  state['fail']=False
+  await page.get_by_role('button',name='Import from GM Assistant',exact=True).click()
+  await page.get_by_role('button',name='Connect / Load campaigns',exact=True).click()
+  await page.get_by_role('button',name='Fetch campaign notes',exact=True).click()
+  await page.get_by_role('heading',name='Place campaign notes — DnD Campaign',exact=True).wait_for()
+  assert await page.get_by_label('World for First Session',exact=True).is_disabled()
+  assert await page.get_by_label('World for First Session',exact=True).input_value()==first_world
+  assert await page.locator('.fa-saved-location').count()==2
+  await page.get_by_role('button',name='Cancel',exact=True).click()
+  # Players cannot see importer or pairing controls.
   await page.evaluate('game.user.isGM=false;window.api.open()')
   await page.wait_for_function("!document.querySelector('[data-cmd=gma-import]')")
   assert not errors,errors

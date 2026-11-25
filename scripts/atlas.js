@@ -1,5 +1,5 @@
 import {renderNotes,imageMarkdown} from './notes.js';
-import {openGMA,resyncGMA} from './gmassistant.js';
+import {openGMA,resyncGMA,manageLinkedGMA} from './gmassistant.js';
 import {ID,TYPES,uid,esc,validate,blank,demo,mediaPath} from './model.js';
 import {renderAtlas,button,img,field,imageField,selectField,symbol} from './view.js';
 const {ApplicationV2}=foundry.applications.api;
@@ -28,6 +28,14 @@ export class FatesAtlas extends ApplicationV2 {
  async _onClose(options){this.dragCleanup?.();return super._onClose(options);}
  get planet(){return this.data.planets.find(p=>p.id===this.view.planet)||[...this.data.planets].sort((a,b)=>a.order-b.order)[0];}
  async refresh(){return this.render({force:true});}
+ async focusEvent(id){
+  const planet=this.data.planets.find(p=>p.events.some(e=>e.id===id));if(!planet)throw Error('This note was not found.');
+  const event=planet.events.find(e=>e.id===id);
+  this.view.planet=planet.id;this.view.chapter=event.parentChapter||'';this.view.selected=event.kind==='chapter'?'':id;
+  if(event.kind==='chapter')this.view.chapter=event.id;
+  this.scroll={left:Math.max(0,event.x*this.view.zoom-100),top:Math.max(0,event.y*this.view.zoom-100)};
+  return this.refresh();
+ }
  switchPlanet(id){this.view.planet=id;this.view.chapter='';this.view.selected='';this.scroll={left:0,top:0};this.refresh();}
  zoom(value){this.view.zoom=Math.max(.4,Math.min(1.5,value));this.refresh();}
  async save(next,base=this.data.revision){
@@ -64,6 +72,7 @@ export class FatesAtlas extends ApplicationV2 {
   if(cmd==='add-event'||cmd==='edit-event')return this.editEvent(cmd==='edit-event'?e:null);
   if(cmd==='types')return this.editTypes();
   if(cmd==='gma-import')return openGMA(this);
+  if(cmd==='gma-linked')return manageLinkedGMA(this);
   if(cmd==='gma-resync')return resyncGMA(this);
   if(cmd==='example')return game.modules.get(ID).api.loadExample();
   if(cmd==='export')return this.export();
@@ -204,7 +213,7 @@ Hooks.once('init',()=>{
  game.keybindings.register(ID,'open',{name:'Open Fate’s Atlas',editable:[{key:'KeyF',modifiers:['Shift']}],onDown:()=>{game.modules.get(ID).api.open();return true;}});
 });
 Hooks.once('ready',()=>{
- game.modules.get(ID).api={open:({planetId,chapterId}={})=>{atlas??=new FatesAtlas();if(planetId)atlas.view.planet=planetId;if(chapterId)atlas.view.chapter=chapterId;return atlas.render({force:true});},exportData:()=>read(),importFromGMA:async()=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();await atlas.render({force:true});openGMA(atlas);},resyncGMA:async()=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();await atlas.render({force:true});return resyncGMA(atlas);},getClassificationProfiles:()=>structuredClone(read().types),saveClassificationProfiles:async profiles=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());const next=structuredClone(atlas.data);if(!Array.isArray(profiles)||!profiles.length)throw Error('Provide at least one classification profile.');next.types=profiles.map(p=>({...p,id:p.id||uid()}));return atlas.save(next);},importData:async data=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(validate(data));},loadExample:async()=>{if(!game.user.isGM)throw Error('GM only.');if(read().planets.length)throw Error('Example can only be loaded into an empty atlas.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(demo());}};
+ game.modules.get(ID).api={open:({planetId,chapterId}={})=>{atlas??=new FatesAtlas();if(planetId)atlas.view.planet=planetId;if(chapterId)atlas.view.chapter=chapterId;return atlas.render({force:true});},exportData:()=>read(),importFromGMA:async()=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();await atlas.render({force:true});openGMA(atlas);},manageLinkedGMA:async()=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();await atlas.render({force:true});return manageLinkedGMA(atlas);},resyncGMA:async()=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();await atlas.render({force:true});return resyncGMA(atlas);},getClassificationProfiles:()=>structuredClone(read().types),saveClassificationProfiles:async profiles=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());const next=structuredClone(atlas.data);if(!Array.isArray(profiles)||!profiles.length)throw Error('Provide at least one classification profile.');next.types=profiles.map(p=>({...p,id:p.id||uid()}));return atlas.save(next);},importData:async data=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(validate(data));},loadExample:async()=>{if(!game.user.isGM)throw Error('GM only.');if(read().planets.length)throw Error('Example can only be loaded into an empty atlas.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(demo());}};
 });
 Hooks.on('renderSettings',(_app,html)=>{
  const el=html instanceof HTMLElement?html:html?.[0];if(!el||el.querySelector('.tely-atlas-launch'))return;

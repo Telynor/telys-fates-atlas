@@ -82,15 +82,16 @@ const formats=[['longform','Long-form: full recap + notes + scene outline'],['re
 export function openGMA(app){
  if(!game.user.isGM)return;
  const config=connection();
- const {form}=app.modal('Import from GM Assistant',`<p>Connect the local companion, select your campaign, then choose the world and timeline position for each session.</p>${field('url','Companion address',config.url||'http://127.0.0.1:43127')}${field('token','Companion pairing token',config.token||'','password','autocomplete="off"')}<p class="fa-muted">Run companion/Start-Windows.bat from this module on your computer. Use its setup window to paste your Foundry URL and read API key, then click Start companion. Copy its pairing token here.</p><div class="fa-inline-buttons">${button('connect-gma','Connect / Load campaigns')}${button('disconnect-gma','Disconnect')}${button('resync-gma','Resync all linked notes')}</div><label class="fa-field"><span>Campaign</span><select name="campaign" aria-label="Campaign"><option value="">Connect to load your campaigns</option></select></label>${selectField('format','Notes to fetch', 'longform',formats)}<p class="fa-gma-status" role="status"></p>`,null,button('fetch-gma','Fetch campaign notes','class="fa-primary"'));
+ const {form}=app.modal('Import from GM Assistant',`<p>Connect the local companion, select your campaign, then choose the world and timeline position for each session.</p>${field('url','Companion address',config.url||'http://127.0.0.1:43127')}${field('token','Companion pairing token',config.token||'','password','autocomplete="off"')}<p class="fa-muted">Run companion/Start-Windows.bat from this module on your computer. Use its setup window to paste your Foundry URL and read API key, then click Start companion. Copy its pairing token here.</p><div class="fa-inline-buttons">${button('connect-gma','Connect / Load campaigns')}${button('disconnect-gma','Disconnect')}${button('resync-gma','Resync all linked notes')}${button('manage-gma','Linked notes')}</div><label class="fa-field"><span>Campaign</span><select name="campaign" aria-label="Campaign"><option value="">Connect to load your campaigns</option></select></label>${selectField('format','Notes to fetch', 'longform',formats)}<p class="fa-gma-status" role="status"></p>`,null,button('fetch-gma','Fetch campaign notes','class="fa-primary"'));
  let client,campaigns=[];
  const status=form.querySelector('.fa-gma-status'),error=form.querySelector('.fa-error');
  let busy=false;
  form.addEventListener('click',async ev=>{
-  const cmd=ev.target.closest('[data-cmd]')?.dataset.cmd;if(!['connect-gma','disconnect-gma','fetch-gma','resync-gma'].includes(cmd)||busy)return;
+  const cmd=ev.target.closest('[data-cmd]')?.dataset.cmd;if(!['connect-gma','disconnect-gma','fetch-gma','resync-gma','manage-gma'].includes(cmd)||busy)return;
   error.textContent='';busy=true;
   const buttons=[...form.querySelectorAll('[data-cmd]')].filter(b=>b.dataset.cmd!=='cancel');buttons.forEach(b=>b.disabled=true);
   try{
+   if(cmd==='manage-gma')return manageLinkedGMA(app);
    if(cmd==='disconnect-gma'){await game.settings.set(ID,'gmaConnection',{});form.elements.token.value='';form.elements.campaign.innerHTML='<option value="">Disconnected</option>';status.textContent='Disconnected. Stop the companion window to end its connection.';client=null;return;}
    if(cmd==='connect-gma'){
     client=new GMAClient({url:form.elements.url.value,token:form.elements.token.value.trim()});status.textContent='Connecting…';campaigns=await client.campaigns();
@@ -111,36 +112,136 @@ export function openGMA(app){
   finally{busy=false;buttons.forEach(b=>b.disabled=false);}
  });
 }
+export function linkedNotes(data){
+ return data.planets.flatMap(planet=>planet.events.filter(event=>event.source?.service==='gmassistant').map(event=>({planet,event,chapter:planet.events.find(c=>c.id===event.parentChapter&&c.kind==='chapter')})));
+}
+export function moveLinkedNotes(data,placements){
+ const next=structuredClone(data),moved=new Set();
+ for(const row of placements){
+  if(!row.include)continue;
+  if(moved.has(row.eventId))throw Error('The same linked note was selected twice.');
+  const from=next.planets.find(p=>p.events.some(e=>e.id===row.eventId&&e.source?.service==='gmassistant'));
+  if(!from)throw Error('A linked note no longer exists. Reopen Linked notes and try again.');
+  const destination=next.planets.find(p=>p.id===row.planetId);
+  if(!destination)throw Error('Choose a valid destination world.');
+  const chapter=row.chapterId||'';
+  if(chapter&&!destination.events.some(e=>e.id===chapter&&e.kind==='chapter'))throw Error('Choose a chapter in the destination world.');
+  const x=Number(row.x),y=Number(row.y);
+  if(!Number.isFinite(x)||!Number.isFinite(y)||x<40||x>20000||y<90||y>10000)throw Error('Positions must be X 40–20000 and Y 90–10000.');
+  const index=from.events.findIndex(e=>e.id===row.eventId),event=from.events[index];
+  if(from!==destination){from.events.splice(index,1);destination.events.push(event);}
+  event.parentChapter=chapter;event.x=x;event.y=y;
+  if(row.type)event.type=row.type;
+  moved.add(event.id);
+ }
+ // Keep links between notes moved together; remove only links that now cross a world or chapter boundary.
+ const scopes=new Map(next.planets.flatMap(p=>p.events.map(e=>[e.id,p.id+':'+(e.parentChapter||'')])));
+ for(const p of next.planets)for(const e of p.events)e.parents=e.parents.filter(id=>!(moved.has(e.id)||moved.has(id))||scopes.get(id)===scopes.get(e.id));
+ return {data:next,moved:moved.size};
+}
+export function capturePlacementRows(container,rows){
+ for(const holder of container.querySelectorAll('[data-row]')){
+  const i=Number(holder.dataset.row),row=rows[i];if(!row)continue;
+  const value=name=>holder.querySelector(`[name="${name}-${i}"]`);
+  if(value('include')&&!value('include').matches(':disabled'))row.include=value('include').checked;
+  if(value('world')&&!value('world').matches(':disabled'))row.planetId=value('world').value;
+  if(value('chapter')&&!value('chapter').matches(':disabled'))row.chapterId=value('chapter').value;
+  if(value('type')&&!value('type').matches(':disabled'))row.type=value('type').value;
+  if(value('x')&&!value('x').matches(':disabled'))row.x=Number(value('x').value);
+  if(value('y')&&!value('y').matches(':disabled'))row.y=Number(value('y').value);
+ }
+ return rows;
+}
+function chapters(planet){return [['','Planet overview'],...planet.events.filter(e=>e.kind==='chapter').map(e=>[e.id,e.name])];}
+function changeRowWorld(holder,i,planet){
+ const select=holder.querySelector(`[name="chapter-${i}"]`);
+ select.innerHTML=chapters(planet).map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('');
+}
 function placementGMA(app,docs,campaign){
- const base=app.data.revision;const data=structuredClone(app.data);const planets=data.planets;
- const existing=new Set(planets.flatMap(p=>p.events.filter(e=>e.source?.service==='gmassistant').map(e=>sourceKey(e.source.campaignId,e.source.sessionId))));
- const rows=docs.map((doc,i)=>({include:!!doc.body&&!existing.has(sourceKey(campaign.campaignId,doc.id)),planetId:app.planet.id,chapterId:app.view.chapter||'',x:260+(i%59)*330,y:240+Math.floor(i/59)*220,type:data.types[0].id}));
- const {form}=app.modal(`Place campaign notes — ${campaign.campaignName}`,`<p>Each session becomes one linked quest card. Set the defaults, then adjust any session’s world, chapter, classification, and position below.</p><div class="fa-two-col">${selectField('world','Default world',app.planet.id,planets.map(p=>[p.id,p.name]))}${selectField('chapter','Default chapter',app.view.chapter||'',[['','Planet overview'],...app.planet.events.filter(e=>e.kind==='chapter').map(e=>[e.id,e.name])])}${selectField('type','Default classification',data.types[0].id,data.types.map(t=>[t.id,t.name]))}${selectField('status','Quest status','complete',[['complete','Completed'],['available','Available'],['active','In progress']])}${field('startX','First horizontal position',260,'number','min="40" max="20000"')}${field('y','Vertical position',240,'number','min="90" max="10000"')}${field('spacing','Horizontal spacing',330,'number','min="260" max="2000"')}${field('prefix','Title prefix (optional)','')}</div><label><input name="connect" type="checkbox" checked> Connect consecutive imported sessions</label>${button('apply-defaults','Apply defaults to selected sessions')}<p class="fa-muted">Imported notes will be visible to your players in the atlas. Already linked and empty sessions are skipped. Resync replaces linked source text while preserving artwork, placement, profiles, and inserted images.</p><div class="fa-gma-rows"></div>`,async()=>{
+ const base=app.data.revision,data=structuredClone(app.data),planets=data.planets;
+ const existing=new Map(linkedNotes(data).map(record=>[sourceKey(record.event.source.campaignId,record.event.source.sessionId),record]));
+ const initialChapter=app.planet.events.some(e=>e.id===app.view.chapter&&e.kind==='chapter')?app.view.chapter:'';
+ const rows=docs.map((doc,i)=>{const record=existing.get(sourceKey(campaign.campaignId,doc.id));return {include:!!doc.body&&!record,planetId:record?.planet.id||app.planet.id,chapterId:record?record.event.parentChapter||'':initialChapter,x:record?.event.x??260+(i%59)*330,y:record?.event.y??240+Math.floor(i/59)*220,type:record?.event.type||data.types[0].id,customized:false};});
+ const {form}=app.modal(`Place campaign notes — ${campaign.campaignName}`,`<p>Defaults apply immediately to sessions without individual changes. Each session’s destination below is what will be saved. Changing one session does not change the others.</p><div class="fa-two-col">${selectField('world','Default world',app.planet.id,planets.map(p=>[p.id,p.name]))}${selectField('chapter','Default chapter',initialChapter,chapters(app.planet))}${selectField('type','Default classification',data.types[0].id,data.types.map(t=>[t.id,t.name]))}${selectField('status','Quest status','complete',[['complete','Completed'],['available','Available'],['active','In progress']])}${field('startX','First horizontal position',260,'number','min="40" max="20000"')}${field('y','Vertical position',240,'number','min="90" max="10000"')}${field('spacing','Horizontal spacing',330,'number','min="260" max="2000"')}${field('prefix','Title prefix (optional)','')}</div><label><input name="connect" type="checkbox" checked> Connect consecutive imported sessions</label>${button('apply-defaults','Apply defaults to all selected sessions')}<p class="fa-muted">Imported notes are visible to players. Already-linked sessions show their saved location and cannot be imported again. Use Linked notes to move them without duplicating or losing content.</p><div class="fa-placement-summary" role="status"></div><div class="fa-gma-rows"></div>`,async()=>{
+  capturePlacementRows(form.querySelector('.fa-gma-rows'),rows);
   const result=applyImport(data,docs,rows,{...campaign,type:form.elements.type.value,status:form.elements.status.value,prefix:form.elements.prefix.value,connect:form.elements.connect.checked});
-  if(!result.added)throw Error('Select at least one session with notes that is not already linked.');
-  await app.save(result.data,base);ui.notifications.info(`Imported ${result.added} session(s); skipped ${result.skipped}.`);
+  if(!result.added)throw Error('Select at least one unlinked session with notes. Use Linked notes to move existing imports.');
+  const first=result.data.planets.flatMap(p=>p.events.filter(e=>!data.planets.some(old=>old.events.some(v=>v.id===e.id))).map(e=>({planet:p,event:e})))[0];
+  if(first){app.view.planet=first.planet.id;app.view.chapter=first.event.parentChapter||'';app.view.selected=first.event.id;app.scroll={left:Math.max(0,first.event.x*app.view.zoom-100),top:Math.max(0,first.event.y*app.view.zoom-100)};}
+  await app.save(result.data,base);
+  const counts=new Map();for(const p of result.data.planets){const n=p.events.filter(e=>!data.planets.some(old=>old.events.some(v=>v.id===e.id))).length;if(n)counts.set(p.name,(counts.get(p.name)||0)+n);}
+  ui.notifications.info(`Imported ${result.added}: ${[...counts].map(([name,n])=>name+' ('+n+')').join(', ')}. Skipped ${result.skipped}.`);
+ });
+ form.noValidate=true;
+ const summary=()=>{const counts=new Map();rows.forEach(row=>{if(row.include)counts.set(row.planetId,(counts.get(row.planetId)||0)+1);});form.querySelector('.fa-placement-summary').textContent='Will import: '+([...counts].map(([id,n])=>`${planets.find(p=>p.id===id)?.name}: ${n}`).join(' · ')||'no sessions selected');};
+ const draw=()=>{
+  const list=form.querySelector('.fa-gma-rows');list.innerHTML=docs.map((doc,i)=>{
+   const row=rows[i],p=planets.find(p=>p.id===row.planetId),record=existing.get(sourceKey(campaign.campaignId,doc.id));
+   return `<fieldset class="fa-gma-row" data-row="${i}"><legend><label><input name="include-${i}" type="checkbox" ${row.include?'checked':''} ${!doc.body||record?'disabled':''}> ${esc(doc.name)} ${record?'— already linked':!doc.body?'— no notes':''}</label></legend>${record?`<p class="fa-saved-location">Saved in ${esc(record.planet.name)} / ${esc(record.chapter?.name||'Planet overview')} — X ${record.event.x}, Y ${record.event.y}. Use Linked notes to locate or move this entry.</p>`:''}<fieldset class="fa-two-col fa-placement-fields" ${record?'disabled':''}>${selectField('world-'+i,'World for '+doc.name,row.planetId,planets.map(p=>[p.id,p.name]))}${selectField('chapter-'+i,'Chapter for '+doc.name,row.chapterId,chapters(p))}${field('x-'+i,'X',row.x,'number','min="40" max="20000"')}${field('y-'+i,'Y',row.y,'number','min="90" max="10000"')}${selectField('type-'+i,'Classification for '+doc.name,row.type,data.types.map(t=>[t.id,t.name]))}</fieldset><details><summary>Preview fetched notes (${doc.body.length.toLocaleString()} characters)</summary><pre>${esc(doc.body)}</pre></details></fieldset>`;
+  }).join('');summary();
+ };
+ const applyDefaults=force=>{
+  capturePlacementRows(form.querySelector('.fa-gma-rows'),rows);
+  const start=Number(form.elements.startX.value),spacing=Number(form.elements.spacing.value),columns=Math.max(1,Math.floor((20000-start)/Math.max(1,spacing))+1);
+  let n=0;rows.forEach(row=>{if(!row.include)return;const i=n++;if(row.customized&&!force)return;Object.assign(row,{planetId:form.elements.world.value,chapterId:form.elements.chapter.value,type:form.elements.type.value,x:start+(i%columns)*spacing,y:Number(form.elements.y.value)+Math.floor(i/columns)*220,customized:false});});draw();
+ };
+ draw();
+ form.elements.world.addEventListener('change',()=>{const p=planets.find(p=>p.id===form.elements.world.value);form.elements.chapter.innerHTML=chapters(p).map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('');applyDefaults(false);});
+ for(const name of ['chapter','type'])form.elements[name].addEventListener('change',()=>applyDefaults(false));
+ for(const name of ['startX','spacing','y'])form.elements[name].addEventListener('input',()=>applyDefaults(false));
+ form.querySelector('[data-cmd=apply-defaults]').addEventListener('click',()=>applyDefaults(true));
+ const list=form.querySelector('.fa-gma-rows');
+ const capture=event=>{
+  const holder=event.target.closest('[data-row]');if(!holder)return;
+  const i=Number(holder.dataset.row),row=rows[i],name=event.target.name.split('-')[0];
+  if(name==='world'){row.chapterId='';changeRowWorld(holder,i,planets.find(p=>p.id===event.target.value));}
+  if(name!=='include')row.customized=true;
+  capturePlacementRows(list,rows);summary();
+ };
+ list.addEventListener('change',capture);list.addEventListener('input',capture);
+}
+export function manageLinkedGMA(app){
+ if(!game.user.isGM)return;
+ const data=structuredClone(app.data),base=data.revision,records=linkedNotes(data);
+ if(!records.length)throw Error('No imported notes are linked yet.');
+ const rows=records.map(({planet,event})=>({eventId:event.id,include:false,planetId:planet.id,chapterId:event.parentChapter||'',x:event.x,y:event.y}));
+ const {form,close}=app.modal('Linked GM Assistant notes',`<p>This list shows where each linked note is actually saved. Locate opens that note and centers the timeline, including notes inside chapters or off-screen.</p>${field('filter','Filter linked notes','')}<div class="fa-two-col">${selectField('bulkWorld','Move selected notes to world',app.planet.id,data.planets.map(p=>[p.id,p.name]))}${selectField('bulkChapter','Move selected notes to chapter','',chapters(app.planet))}</div><div class="fa-inline-buttons">${button('select-visible','Select visible notes')}${button('select-none','Clear selection')}${button('move-selected','Apply world/chapter to selected notes')}</div><p class="fa-muted">Changes are saved only when you click Save. Moving preserves the existing note, images, classification, and GM Assistant link. Connections that cross the new world or chapter boundary are removed.</p><div class="fa-gma-rows"></div>`,async()=>{
+  capturePlacementRows(form.querySelector('.fa-gma-rows'),rows);
+  if(!rows.some(row=>row.include))throw Error('Select the notes to move or edit a destination first.');
+  const result=moveLinkedNotes(data,rows);await app.save(result.data,base);
+  const first=rows.find(row=>row.include);if(first)await app.focusEvent(first.eventId);
+  ui.notifications.info(`Updated placement for ${result.moved} linked note(s).`);
  });
  form.noValidate=true;
  const draw=()=>{
-  const list=form.querySelector('.fa-gma-rows');list.innerHTML=docs.map((doc,i)=>{
-   const row=rows[i],p=planets.find(p=>p.id===row.planetId),linked=existing.has(sourceKey(campaign.campaignId,doc.id));
-   return `<fieldset class="fa-gma-row" data-row="${i}"><legend><label><input name="include-${i}" type="checkbox" ${row.include?'checked':''} ${!doc.body||linked?'disabled':''}> ${esc(doc.name)} ${linked?'— already linked':!doc.body?'— no notes':''}</label></legend><div class="fa-two-col">${selectField('world-'+i,'World for '+doc.name,row.planetId,planets.map(p=>[p.id,p.name]))}${selectField('chapter-'+i,'Chapter for '+doc.name,row.chapterId,[['','Planet overview'],...p.events.filter(e=>e.kind==='chapter').map(e=>[e.id,e.name])])}${field('x-'+i,'X',row.x,'number','min="40" max="20000"')}${field('y-'+i,'Y',row.y,'number','min="90" max="10000"')}${selectField('type-'+i,'Classification for '+doc.name,row.type,data.types.map(t=>[t.id,t.name]))}</div><details><summary>Preview fetched notes (${doc.body.length.toLocaleString()} characters)</summary><pre>${esc(doc.body)}</pre></details></fieldset>`;
+  const filter=form.elements.filter.value.trim().toLowerCase();
+  form.querySelector('.fa-gma-rows').innerHTML=records.map((record,i)=>{
+   const row=rows[i],destination=data.planets.find(p=>p.id===row.planetId),match=(record.event.name+' '+record.planet.name+' '+(record.chapter?.name||'')+' '+record.event.chapter).toLowerCase().includes(filter);
+   return `<fieldset class="fa-gma-row" data-row="${i}" ${match?'':'hidden'}><legend><label><input name="include-${i}" type="checkbox" ${row.include?'checked':''}> ${esc(record.event.name)}</label></legend><p class="fa-saved-location">Saved in ${esc(record.planet.name)} / ${esc(record.chapter?.name||'Planet overview')} — X ${record.event.x}, Y ${record.event.y}</p>${button('locate-linked','Locate',`data-index="${i}" aria-label="Locate ${esc(record.event.name)}"`)}<div class="fa-two-col">${selectField('world-'+i,'World for '+record.event.name,row.planetId,data.planets.map(p=>[p.id,p.name]))}${selectField('chapter-'+i,'Chapter for '+record.event.name,row.chapterId,chapters(destination))}${field('x-'+i,'X',row.x,'number','min="40" max="20000"')}${field('y-'+i,'Y',row.y,'number','min="90" max="10000"')}</div></fieldset>`;
   }).join('');
  };
  draw();
- form.elements.world.addEventListener('change',()=>{const p=planets.find(p=>p.id===form.elements.world.value);form.elements.chapter.innerHTML='<option value="">Planet overview</option>'+p.events.filter(e=>e.kind==='chapter').map(e=>`<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');});
- form.querySelector('[data-cmd=apply-defaults]').addEventListener('click',()=>{
-  let n=0;rows.forEach(row=>{if(!row.include)return;Object.assign(row,{planetId:form.elements.world.value,chapterId:form.elements.chapter.value,type:form.elements.type.value,x:Number(form.elements.startX.value)+(n%Math.max(1,Math.floor((20000-Number(form.elements.startX.value))/Number(form.elements.spacing.value))+1))*Number(form.elements.spacing.value),y:Number(form.elements.y.value)+Math.floor(n++/Math.max(1,Math.floor((20000-Number(form.elements.startX.value))/Number(form.elements.spacing.value))+1))*220});});draw();
+ form.elements.filter.addEventListener('input',()=>{capturePlacementRows(form.querySelector('.fa-gma-rows'),rows);draw();});
+ form.elements.bulkWorld.addEventListener('change',()=>{const p=data.planets.find(p=>p.id===form.elements.bulkWorld.value);form.elements.bulkChapter.innerHTML=chapters(p).map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('');});
+ form.addEventListener('click',async event=>{
+  const target=event.target.closest('[data-cmd]');if(!target)return;
+  const cmd=target.dataset.cmd,list=form.querySelector('.fa-gma-rows');
+  if(cmd==='locate-linked'){close();await app.focusEvent(records[Number(target.dataset.index)].event.id);return;}
+  capturePlacementRows(list,rows);
+  if(cmd==='select-visible'){list.querySelectorAll('[data-row]:not([hidden])').forEach(h=>rows[Number(h.dataset.row)].include=true);draw();}
+  if(cmd==='select-none'){rows.forEach(row=>row.include=false);draw();}
+  if(cmd==='move-selected'){rows.forEach(row=>{if(row.include){row.planetId=form.elements.bulkWorld.value;row.chapterId=form.elements.bulkChapter.value;}});draw();}
  });
- form.querySelector('.fa-gma-rows').addEventListener('change',event=>{
-  const holder=event.target.closest('[data-row]');if(!holder)return;const i=Number(holder.dataset.row),row=rows[i],name=event.target.name.split('-')[0],value=event.target.value;
-  if(name==='include')row.include=event.target.checked;
-  if(name==='world'){row.planetId=value;row.chapterId='';draw();}
-  if(name==='chapter')row.chapterId=value;
-  if(name==='type')row.type=value;
-  if(name==='x'||name==='y')row[name]=Number(value);
- });
+ const capture=event=>{
+  const holder=event.target.closest('[data-row]');if(!holder)return;
+  const i=Number(holder.dataset.row),name=event.target.name.split('-')[0];
+  if(name==='world')changeRowWorld(holder,i,data.planets.find(p=>p.id===event.target.value));
+  if(name!=='include')holder.querySelector(`[name="include-${i}"]`).checked=true;
+  capturePlacementRows(form.querySelector('.fa-gma-rows'),rows);
+ };
+ form.querySelector('.fa-gma-rows').addEventListener('change',capture);form.querySelector('.fa-gma-rows').addEventListener('input',capture);
 }
+
 let syncing=false;
 export async function resyncGMA(app,existingStatus=null){
  if(!game.user.isGM)throw Error('GM only.');if(syncing)throw Error('A resync is already running.');

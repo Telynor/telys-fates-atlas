@@ -40,3 +40,9 @@ Run `node tests/test_model.mjs`, `node tests/test_gma.mjs`, and `python3 tests/t
 ## 1.1.1 — companion input fix
 
 Replaced hidden console input with a Tk setup window, explicit clipboard buttons, a visible-editable masked key field, optional key reveal, and copyable pairing details. Automated setup-controller tests cover clipboard replacement, validation, starting the real loopback service, authenticated status reads, copying the token, stopping, and clearing credentials. These controller tests use mock widgets; a native Windows desktop check remains pending. Existing companion boundary tests also pass.
+
+## 1.1.2 — mixed-world placement and linked-note recovery
+
+Fixed the default-world control requiring a separate Apply click, saved placements directly from visible controls, and removed misleading editable placement controls on already-linked sessions. Added an offline linked-note manager with actual saved locations, Locate, individual/bulk moves, and connection cleanup when scopes change.
+
+Regression tests cover a single campaign imported into different worlds with different chapter scopes and coordinates, automatic defaults without Apply, linked-note Locate for an off-screen entry, moving an existing entry without duplication or loss of its source/content/artwork, and read-only destination controls when reimporting a linked session. Unit tests cover moving notes individually and as a connected group. Tests use the existing browser harness rather than a running Foundry world.
