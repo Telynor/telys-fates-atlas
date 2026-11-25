@@ -37,6 +37,12 @@ class TestBridge(unittest.TestCase):
   self.assertFalse(self.paths)
  def test_preflight(self):
   status,headers,body=self.call('/v1/campaigns',method='OPTIONS',token='');self.assertEqual(status,200);self.assertEqual(headers['Access-Control-Allow-Private-Network'],'true')
+ def test_open_window_requires_pairing(self):
+  called=threading.Event();self.server.open_window=called.set
+  self.assertEqual(self.call('/open',method='POST',token='bad')[0],401);self.assertFalse(called.is_set())
+  self.assertEqual(self.call('/open',method='POST',origin='https://evil.test')[0],403);self.assertFalse(called.is_set())
+  self.assertEqual(self.call('/open',method='PUT')[0],405);self.assertFalse(called.is_set())
+  self.assertEqual(self.call('/open',method='POST')[0],200);self.assertTrue(called.is_set());self.assertFalse(self.paths)
  def test_notes_routes(self):
   for path in ['/v1/campaigns/c1/sessions','/v1/campaigns/c1/sessions/s1','/v1/campaigns/c1/sessions/s1/notes','/v1/campaigns/c1/sessions/s1/recaps/default','/v1/campaigns/c1/sessions/s1/scenes']:
    self.assertEqual(self.call(path)[0],200,path)

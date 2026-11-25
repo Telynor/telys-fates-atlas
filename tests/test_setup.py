@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import threading
+from unittest.mock import patch
 import urllib.request
 import json
 
@@ -28,7 +30,7 @@ class Root:
 class TestSetup(unittest.TestCase):
  def setUp(self):
   self.ui=b.SetupWindow.__new__(b.SetupWindow);u=self.ui
-  u.root=Root();u.port=0;u.server=None
+  u.root=Root();u.port=0;u.server=None;u.show_requested=threading.Event()
   u.origin=Value();u.key=Value();u.address=Value();u.token=Value();u.status=Value()
   u.origin_entry=Widget(u.origin);u.key_entry=Widget(u.key)
   u.paste_origin=Widget();u.paste_key=Widget();u.start_button=Widget();u.stop_button=Widget()
@@ -45,6 +47,25 @@ class TestSetup(unittest.TestCase):
  def test_invalid_values_stay_editable(self):
   u=self.ui;u.start();self.assertIsNone(u.server);self.assertEqual(u.key_entry.state,'normal')
   u.origin.set('http://localhost:30000');u.key.set('incomplete');u.start();self.assertIsNone(u.server);self.assertIn('gma_',u.status.get())
+ def test_windows_launcher_registration_is_fixed_and_per_user(self):
+  values={}
+  class Registry:
+   HKEY_CURRENT_USER='HKCU';REG_SZ=1
+   class Key:
+    def __init__(self,path):self.path=path
+    def __enter__(self):return self
+    def __exit__(self,*args):pass
+   @classmethod
+   def CreateKey(cls,root,path):
+    self.assertEqual(root,'HKCU');return cls.Key(path)
+   @staticmethod
+   def SetValueEx(key,name,reserved,kind,value):values[(key.path,name)]=value
+  with patch.object(b.sys,'platform','win32'),patch.dict(b.sys.modules,{'winreg':Registry}):b.register_windows_launcher()
+  base='Software'+chr(92)+'Classes'+chr(92)+'tely-fates-atlas'
+  self.assertIn((base,'URL Protocol'),values)
+  command=values[(base+chr(92)+'shell'+chr(92)+'open'+chr(92)+'command','')]
+  self.assertTrue(command.endswith(' --gui'));self.assertNotIn('%1',command)
+  self.assertIn('gma_bridge.py',command)
  def test_paste_replaces_old_key(self):
   u=self.ui;u.key.set('old');u.root.clipboard='gma_new';u.paste(u.key_entry);self.assertEqual(u.key.get(),'gma_new')
 if __name__=='__main__':unittest.main()

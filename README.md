@@ -1,4 +1,4 @@
-# Tely’s Fate’s Atlas — 1.1.2
+# Tely’s Fate’s Atlas — 1.1.3
 
 A system-independent Foundry VTT 14 module, built around the supplied Fate’s Atlas video reference: planet navigation, branching illustrated chapters, chapter-specific quest timelines, a right-hand quest panel, and picture recaps.
 
@@ -151,3 +151,23 @@ These operations move the original records: their IDs, text, source links, artwo
 The placement wizard now reads each visible row directly on Save and does not require a separate default-application click. Individually customized rows retain their overrides when defaults change. A destination summary shows the import counts for each world before saving; the completion notification also reports the saved counts by world. After import, the first new note is opened in its destination and centered.
 
 Existing notes are never automatically moved based on a guess about which world they belong to. Use Linked notes to review and correct existing placement.
+
+## Open companion button (1.1.3)
+
+The importer now has an **Open companion** button. An already connected graphical companion is brought forward through its paired local connection.
+
+To launch a closed companion from this button on Windows, run the updated **companion/Start-Windows.bat** once and click **Enable Atlas launch button (Windows)** in its setup window. This registers the dedicated `tely-fates-atlas:` app link for your current Windows user, pointing only to this companion script. No administrator access is needed. Re-enable the button if the module folder or Python installation moves. Windows or the browser may ask you to confirm opening the registered companion app.
+
+After that one-time setup, **Open companion** launches its window directly. Existing companion windows are brought forward instead of creating a second setup window. The launch link contains no API key, pairing token, or server URL; keys remain in the companion process. The companion still needs its key and Start action after a fresh launch. The registered app link is currently Windows-only.
+
+The local `/open` action requires the same exact Foundry origin and pairing token as note reads. It raises the GUI and does not write to GM Assistant. Console-mode users should continue using their console window.
+
+## Notes that appear to vanish (1.1.3)
+
+- World navigation remembers its chapter, selected note, zoom, and scroll position during the current Atlas session. First visits frame the current timeline rather than always showing coordinate zero.
+- **Fit** frames the actual card area, including far-away notes, and supports zooming out further for large timelines.
+- **World notes (N)** lists every saved quest in that world, including other chapters. Open any entry to navigate directly to it.
+- Imports and linked-note moves default to **Separate overlapping cards/notes automatically**. A requested position that collides with an existing card is shifted to free space. Turn this off only when you deliberately want exact overlapping placement.
+- For notes already stacked on top of one another, open **Linked notes**, select those notes, leave **Separate overlapping notes automatically** enabled, and click **Save**. Their text, images, classifications and source links stay intact.
+
+These changes address visibility and overlapping placement. They do not silently delete, reimport, or move records to a guessed world. If a record is absent even from World notes and Linked notes, export the Atlas JSON for direct inspection.

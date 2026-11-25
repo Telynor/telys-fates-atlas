@@ -16,11 +16,13 @@ async def main():
   browser=await p.chromium.launch(headless=True,args=['--no-sandbox'],**({'executable_path':os.environ['ATLAS_CHROMIUM']} if os.environ.get('ATLAS_CHROMIUM') else {}))
   page=await browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(8000)
   errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-  state={'version':1,'fail':False}
+  state={'version':1,'fail':False,'opened':0}
   async def route(request):
    url=request.request.url;path=url.split('43127')[1].split('?')[0];method=request.request.method
    code=200
    if method=='OPTIONS':body={}
+   elif path=='/open':
+    assert method=='POST';state['opened']+=1;body={'ok':True,'opened':True}
    elif path=='/v1/campaigns':body={'data':[{'id':'c1','title':'DnD Campaign'}],'page':{'has_more':False}}
    elif path=='/v1/campaigns/c1/sessions':body={'data':[{'id':'s1','title':'First Session','played_at':'2026-11-01'},{'id':'s2','title':'Second Session','played_at':'2026-11-08'}],'page':{'has_more':False}}
    elif path.endswith('/sessions/s1'):body={'id':'s1','title':'First Session' if state['version']==1 else 'First Session revised','played_at':'2026-11-01'}
@@ -38,6 +40,10 @@ async def main():
   await page.get_by_label('Companion pairing token',exact=True).fill('mock-pairing-token')
   await page.get_by_role('button',name='Connect / Load campaigns',exact=True).click()
   await page.get_by_label('Campaign',exact=True).select_option('c1')
+  await page.get_by_role('button',name='Open companion',exact=True).click()
+  await page.locator('.fa-gma-status').filter(has_text='Companion window requested').wait_for()
+  assert state['opened']==1
+  assert await page.locator('iframe').count()==0
   await page.get_by_role('button',name='Fetch campaign notes',exact=True).click()
   await page.get_by_role('heading',name='Place campaign notes — DnD Campaign',exact=True).wait_for()
   await page.get_by_label('Default world',exact=True).select_option(label='Second World')
@@ -118,6 +124,38 @@ async def main():
   assert await page.get_by_label('World for First Session',exact=True).input_value()==first_world
   assert await page.locator('.fa-saved-location').count()==2
   await page.get_by_role('button',name='Cancel',exact=True).click()
+  # Reproduce two notes arriving at identical coordinates, then switch away/back and reload.
+  await page.get_by_role('button',name='Linked notes',exact=True).click()
+  for title in ['First Session revised','Second Session']:
+   await page.get_by_label('World for '+title,exact=True).select_option(label='Second World')
+   row=page.locator('.fa-gma-row').filter(has_text=title)
+   await row.get_by_label('X',exact=True).fill('260')
+   await row.get_by_label('Y',exact=True).fill('240')
+  await page.get_by_role('button',name='Save',exact=True).click()
+  await page.wait_for_function('window.getData().planets[1].events.filter(e=>e.source).length===2')
+  pair=await page.evaluate('window.getData().planets[1].events.filter(e=>e.source)')
+  assert abs(pair[0]['x']-pair[1]['x'])>=260 or abs(pair[0]['y']-pair[1]['y'])>=155
+  second_world=await page.evaluate('window.getData().planets[1].id')
+  for repeat in range(3):
+   await page.get_by_role('combobox',name='Planet',exact=True).select_option(first_world)
+   await page.get_by_role('combobox',name='Planet',exact=True).select_option(second_world)
+   assert await page.locator('.fa-node').count()==3
+  await page.get_by_role('button',name='Fit',exact=True).click()
+  viewport=await page.locator('.fa-viewport').bounding_box()
+  for title in ['First Session revised','Second Session']:
+   box=await page.get_by_role('button',name=title,exact=True).bounding_box()
+   assert box['x']>=viewport['x']-1 and box['x']+box['width']<=viewport['x']+viewport['width']+1
+  await page.get_by_role('button',name='World notes (2)',exact=True).click()
+  assert await page.locator('.fa-world-note').count()==2
+  await page.get_by_role('button',name='Open First Session revised',exact=True).click()
+  await page.locator('.fa-detail h2').filter(has_text='First Session revised').wait_for()
+  await page.reload();await page.wait_for_function('window.ready')
+  assert await page.evaluate('window.getData().planets[1].events.filter(e=>e.source).length')==2
+  await page.get_by_role('combobox',name='Planet',exact=True).select_option(second_world)
+  assert await page.locator('.fa-node').count()==3
+  await page.get_by_role('button',name='World notes (2)',exact=True).click()
+  assert await page.locator('.fa-world-note').count()==2
+  await page.locator('.fa-dialog').get_by_role('button',name='Close',exact=True).click()
   # Players cannot see importer or pairing controls.
   await page.evaluate('game.user.isGM=false;window.api.open()')
   await page.wait_for_function("!document.querySelector('[data-cmd=gma-import]')")

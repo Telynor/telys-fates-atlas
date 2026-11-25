@@ -46,3 +46,9 @@ Replaced hidden console input with a Tk setup window, explicit clipboard buttons
 Fixed the default-world control requiring a separate Apply click, saved placements directly from visible controls, and removed misleading editable placement controls on already-linked sessions. Added an offline linked-note manager with actual saved locations, Locate, individual/bulk moves, and connection cleanup when scopes change.
 
 Regression tests cover a single campaign imported into different worlds with different chapter scopes and coordinates, automatic defaults without Apply, linked-note Locate for an off-screen entry, moving an existing entry without duplication or loss of its source/content/artwork, and read-only destination controls when reimporting a linked session. Unit tests cover moving notes individually and as a connected group. Tests use the existing browser harness rather than a running Foundry world.
+
+## 1.1.3 — companion button and note visibility
+
+Added a button rather than an embedded frame, a paired local GUI-open action, an explicit per-user Windows app-link registration control, and a fixed launch command without URL argument interpolation. Tests cover the importer button, authenticated window-open requests, rejected wrong-origin/wrong-token requests, launcher registry values with a mock Windows registry, and fallback to the fixed app link when the companion is closed. Native Windows app-link activation still needs verification on Windows.
+
+Visibility tests now move two linked notes to identical requested coordinates, verify separation, switch between worlds repeatedly, frame and open both notes, and reload the browser harness from persisted JSON. Unit tests cover both automatic separation and deliberate exact-overlap placement. The attached console log showed successful placement notifications and no Atlas-specific error; it did not include the user's saved Atlas records.

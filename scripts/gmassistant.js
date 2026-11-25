@@ -53,9 +53,16 @@ export class GMAClient {
 export function digest(text){let a=2166136261,b=5381;for(let i=0;i<text.length;i++){a=Math.imul(a^text.charCodeAt(i),16777619);b=Math.imul(b,33)^text.charCodeAt(i);}return (a>>>0).toString(16)+(b>>>0).toString(16);}
 export function sourceKey(campaign,session){return `${campaign}:${session}`;}
 export function sourceHash(doc){return digest(doc.name+'\n'+doc.body);}
+function freePosition(planet,x,y,chapter,ignore=new Set()){
+ const originalX=x,originalY=y;
+ while(planet.events.some(other=>!ignore.has(other.id)&&(other.parentChapter||'')===chapter&&Math.abs(other.x-x)<260&&Math.abs(other.y-y)<155)){
+  x+=300;if(x>19740){x=40;y+=190;}if(y>9850)throw Error('No free timeline space remains. Choose a different row or chapter.');
+ }
+ return {x,y,separated:x!==originalX||y!==originalY};
+}
 export function applyImport(data,docs,placements,options){
  const next=structuredClone(data);const linked=new Set(next.planets.flatMap(p=>p.events.filter(e=>e.source?.service==='gmassistant').map(e=>sourceKey(e.source.campaignId,e.source.sessionId))));
- let added=0,skipped=0,previous=null;
+ let added=0,skipped=0,separated=0,previous=null;
  docs.forEach((doc,i)=>{
   const row=placements[i];if(!row?.include||!doc.body){skipped++;return;}
   const key=sourceKey(options.campaignId,doc.id);if(linked.has(key)){skipped++;return;}
@@ -63,10 +70,11 @@ export function applyImport(data,docs,placements,options){
   const chapter=row.chapterId||'';if(chapter&&!planet.events.some(e=>e.id===chapter&&e.kind==='chapter'))throw Error('A selected chapter no longer exists.');
   let x=Number(row.x),y=Number(row.y);if(!Number.isFinite(x)||!Number.isFinite(y)||x<40||x>20000||y<90||y>10000)throw Error('Timeline positions must be between X 40–20000 and Y 90–10000.');
   const event={id:uid(),kind:'quest',name:(options.prefix||'')+doc.name,chapter:options.campaignName||'',parentChapter:chapter,description:doc.body,thumbnail:'',picture:'',type:row.type||options.type,status:options.status||'complete',x,y,parents:[],source:{service:'gmassistant',campaignId:options.campaignId,sessionId:doc.id,format:doc.format,hash:sourceHash(doc),prefix:options.prefix||'',lastSync:new Date().toISOString()}};
+  if(options.separateOverlaps!==false){const position=freePosition(planet,event.x,event.y,chapter);event.x=position.x;event.y=position.y;if(position.separated)separated++;}
   if(options.connect&&previous&&previous.planetId===planet.id&&previous.chapterId===chapter)event.parents=[previous.id];
   planet.events.push(event);previous={id:event.id,planetId:planet.id,chapterId:chapter};linked.add(key);added++;
  });
- return {data:next,added,skipped};
+ return {data:next,added,skipped,separated};
 }
 export function applyResync(data,documents){
  const next=structuredClone(data);let updated=0,unchanged=0;
@@ -78,19 +86,39 @@ export function applyResync(data,documents){
  }
  return {data:next,updated,unchanged};
 }
+
+export const COMPANION_LAUNCH_URI='tely-fates-atlas://open-companion';
+export function launchCompanionLink(){
+ const link=document.createElement('a');link.href=COMPANION_LAUNCH_URI;link.style.display='none';
+ document.body.append(link);link.click();link.remove();
+}
+export async function openCompanion(config,status,launch=launchCompanionLink){
+ const base=bridgeAddress(config.url);
+ if(config.token){
+  try{
+   const response=await fetch(base+'/open',{method:'POST',headers:{'X-Atlas-Token':config.token},cache:'no-store',signal:AbortSignal.timeout(1200)});
+   if(response.ok){status.textContent='Companion window requested. Check your taskbar if it is behind Foundry.';return 'running';}
+  }catch{/* A closed companion is launched through its registered Windows app link. */}
+ }
+ launch();
+ status.textContent='Requested the companion through its Windows app link. If prompted, choose Open. If nothing opens, run Start-Windows.bat once and click Enable Atlas launch button (Windows).';
+ return 'launch';
+}
+
 const formats=[['longform','Long-form: full recap + notes + scene outline'],['recap','Full recap only'],['notes','Session notes only'],['scenes','Scene outline only']];
 export function openGMA(app){
  if(!game.user.isGM)return;
  const config=connection();
- const {form}=app.modal('Import from GM Assistant',`<p>Connect the local companion, select your campaign, then choose the world and timeline position for each session.</p>${field('url','Companion address',config.url||'http://127.0.0.1:43127')}${field('token','Companion pairing token',config.token||'','password','autocomplete="off"')}<p class="fa-muted">Run companion/Start-Windows.bat from this module on your computer. Use its setup window to paste your Foundry URL and read API key, then click Start companion. Copy its pairing token here.</p><div class="fa-inline-buttons">${button('connect-gma','Connect / Load campaigns')}${button('disconnect-gma','Disconnect')}${button('resync-gma','Resync all linked notes')}${button('manage-gma','Linked notes')}</div><label class="fa-field"><span>Campaign</span><select name="campaign" aria-label="Campaign"><option value="">Connect to load your campaigns</option></select></label>${selectField('format','Notes to fetch', 'longform',formats)}<p class="fa-gma-status" role="status"></p>`,null,button('fetch-gma','Fetch campaign notes','class="fa-primary"'));
+ const {form}=app.modal('Import from GM Assistant',`<p>Connect the local companion, select your campaign, then choose the world and timeline position for each session.</p>${field('url','Companion address',config.url||'http://127.0.0.1:43127')}${field('token','Companion pairing token',config.token||'','password','autocomplete="off"')}<p class="fa-muted">Run companion/Start-Windows.bat from this module on your computer. Use its setup window to paste your Foundry URL and read API key, then click Start companion. Copy its pairing token here.</p><div class="fa-inline-buttons">${button('open-companion','Open companion')}${button('connect-gma','Connect / Load campaigns')}${button('disconnect-gma','Disconnect')}${button('resync-gma','Resync all linked notes')}${button('manage-gma','Linked notes')}</div><label class="fa-field"><span>Campaign</span><select name="campaign" aria-label="Campaign"><option value="">Connect to load your campaigns</option></select></label>${selectField('format','Notes to fetch', 'longform',formats)}<p class="fa-gma-status" role="status"></p><details class="fa-launch-help"><summary>First-time Open companion setup</summary><p>Run companion/Start-Windows.bat once and click Enable Atlas launch button (Windows). Then Open companion can launch its setup window here, even when it is closed. An already connected companion is brought to the front. Allow the Windows app prompt if one appears.</p></details>`,null,button('fetch-gma','Fetch campaign notes','class="fa-primary"'));
  let client,campaigns=[];
  const status=form.querySelector('.fa-gma-status'),error=form.querySelector('.fa-error');
  let busy=false;
  form.addEventListener('click',async ev=>{
-  const cmd=ev.target.closest('[data-cmd]')?.dataset.cmd;if(!['connect-gma','disconnect-gma','fetch-gma','resync-gma','manage-gma'].includes(cmd)||busy)return;
+  const cmd=ev.target.closest('[data-cmd]')?.dataset.cmd;if(!['open-companion','connect-gma','disconnect-gma','fetch-gma','resync-gma','manage-gma'].includes(cmd)||busy)return;
   error.textContent='';busy=true;
   const buttons=[...form.querySelectorAll('[data-cmd]')].filter(b=>b.dataset.cmd!=='cancel');buttons.forEach(b=>b.disabled=true);
   try{
+   if(cmd==='open-companion')return await openCompanion({url:form.elements.url.value,token:form.elements.token.value.trim()},status);
    if(cmd==='manage-gma')return manageLinkedGMA(app);
    if(cmd==='disconnect-gma'){await game.settings.set(ID,'gmaConnection',{});form.elements.token.value='';form.elements.campaign.innerHTML='<option value="">Disconnected</option>';status.textContent='Disconnected. Stop the companion window to end its connection.';client=null;return;}
    if(cmd==='connect-gma'){
@@ -115,8 +143,8 @@ export function openGMA(app){
 export function linkedNotes(data){
  return data.planets.flatMap(planet=>planet.events.filter(event=>event.source?.service==='gmassistant').map(event=>({planet,event,chapter:planet.events.find(c=>c.id===event.parentChapter&&c.kind==='chapter')})));
 }
-export function moveLinkedNotes(data,placements){
- const next=structuredClone(data),moved=new Set();
+export function moveLinkedNotes(data,placements,{separateOverlaps=true}={}){
+ const next=structuredClone(data),moved=new Set(),pending=new Set(placements.filter(row=>row.include).map(row=>row.eventId));let separated=0;
  for(const row of placements){
   if(!row.include)continue;
   if(moved.has(row.eventId))throw Error('The same linked note was selected twice.');
@@ -126,10 +154,14 @@ export function moveLinkedNotes(data,placements){
   if(!destination)throw Error('Choose a valid destination world.');
   const chapter=row.chapterId||'';
   if(chapter&&!destination.events.some(e=>e.id===chapter&&e.kind==='chapter'))throw Error('Choose a chapter in the destination world.');
-  const x=Number(row.x),y=Number(row.y);
+  let x=Number(row.x),y=Number(row.y);
   if(!Number.isFinite(x)||!Number.isFinite(y)||x<40||x>20000||y<90||y>10000)throw Error('Positions must be X 40–20000 and Y 90–10000.');
   const index=from.events.findIndex(e=>e.id===row.eventId),event=from.events[index];
   if(from!==destination){from.events.splice(index,1);destination.events.push(event);}
+  pending.delete(event.id);
+  if(separateOverlaps){
+   const position=freePosition(destination,x,y,chapter,new Set([...pending,event.id]));x=position.x;y=position.y;if(position.separated)separated++;
+  }
   event.parentChapter=chapter;event.x=x;event.y=y;
   if(row.type)event.type=row.type;
   moved.add(event.id);
@@ -137,7 +169,7 @@ export function moveLinkedNotes(data,placements){
  // Keep links between notes moved together; remove only links that now cross a world or chapter boundary.
  const scopes=new Map(next.planets.flatMap(p=>p.events.map(e=>[e.id,p.id+':'+(e.parentChapter||'')])));
  for(const p of next.planets)for(const e of p.events)e.parents=e.parents.filter(id=>!(moved.has(e.id)||moved.has(id))||scopes.get(id)===scopes.get(e.id));
- return {data:next,moved:moved.size};
+ return {data:next,moved:moved.size,separated};
 }
 export function capturePlacementRows(container,rows){
  for(const holder of container.querySelectorAll('[data-row]')){
@@ -162,9 +194,9 @@ function placementGMA(app,docs,campaign){
  const existing=new Map(linkedNotes(data).map(record=>[sourceKey(record.event.source.campaignId,record.event.source.sessionId),record]));
  const initialChapter=app.planet.events.some(e=>e.id===app.view.chapter&&e.kind==='chapter')?app.view.chapter:'';
  const rows=docs.map((doc,i)=>{const record=existing.get(sourceKey(campaign.campaignId,doc.id));return {include:!!doc.body&&!record,planetId:record?.planet.id||app.planet.id,chapterId:record?record.event.parentChapter||'':initialChapter,x:record?.event.x??260+(i%59)*330,y:record?.event.y??240+Math.floor(i/59)*220,type:record?.event.type||data.types[0].id,customized:false};});
- const {form}=app.modal(`Place campaign notes — ${campaign.campaignName}`,`<p>Defaults apply immediately to sessions without individual changes. Each session’s destination below is what will be saved. Changing one session does not change the others.</p><div class="fa-two-col">${selectField('world','Default world',app.planet.id,planets.map(p=>[p.id,p.name]))}${selectField('chapter','Default chapter',initialChapter,chapters(app.planet))}${selectField('type','Default classification',data.types[0].id,data.types.map(t=>[t.id,t.name]))}${selectField('status','Quest status','complete',[['complete','Completed'],['available','Available'],['active','In progress']])}${field('startX','First horizontal position',260,'number','min="40" max="20000"')}${field('y','Vertical position',240,'number','min="90" max="10000"')}${field('spacing','Horizontal spacing',330,'number','min="260" max="2000"')}${field('prefix','Title prefix (optional)','')}</div><label><input name="connect" type="checkbox" checked> Connect consecutive imported sessions</label>${button('apply-defaults','Apply defaults to all selected sessions')}<p class="fa-muted">Imported notes are visible to players. Already-linked sessions show their saved location and cannot be imported again. Use Linked notes to move them without duplicating or losing content.</p><div class="fa-placement-summary" role="status"></div><div class="fa-gma-rows"></div>`,async()=>{
+ const {form}=app.modal(`Place campaign notes — ${campaign.campaignName}`,`<p>Defaults apply immediately to sessions without individual changes. Each session’s destination below is what will be saved. Changing one session does not change the others.</p><div class="fa-two-col">${selectField('world','Default world',app.planet.id,planets.map(p=>[p.id,p.name]))}${selectField('chapter','Default chapter',initialChapter,chapters(app.planet))}${selectField('type','Default classification',data.types[0].id,data.types.map(t=>[t.id,t.name]))}${selectField('status','Quest status','complete',[['complete','Completed'],['available','Available'],['active','In progress']])}${field('startX','First horizontal position',260,'number','min="40" max="20000"')}${field('y','Vertical position',240,'number','min="90" max="10000"')}${field('spacing','Horizontal spacing',330,'number','min="260" max="2000"')}${field('prefix','Title prefix (optional)','')}</div><label><input name="connect" type="checkbox" checked> Connect consecutive imported sessions</label><label><input name="separateOverlaps" type="checkbox" checked> Separate overlapping cards automatically</label>${button('apply-defaults','Apply defaults to all selected sessions')}<p class="fa-muted">Imported notes are visible to players. Already-linked sessions show their saved location and cannot be imported again. Use Linked notes to move them without duplicating or losing content.</p><div class="fa-placement-summary" role="status"></div><div class="fa-gma-rows"></div>`,async()=>{
   capturePlacementRows(form.querySelector('.fa-gma-rows'),rows);
-  const result=applyImport(data,docs,rows,{...campaign,type:form.elements.type.value,status:form.elements.status.value,prefix:form.elements.prefix.value,connect:form.elements.connect.checked});
+  const result=applyImport(data,docs,rows,{...campaign,type:form.elements.type.value,status:form.elements.status.value,prefix:form.elements.prefix.value,connect:form.elements.connect.checked,separateOverlaps:form.elements.separateOverlaps.checked});
   if(!result.added)throw Error('Select at least one unlinked session with notes. Use Linked notes to move existing imports.');
   const first=result.data.planets.flatMap(p=>p.events.filter(e=>!data.planets.some(old=>old.events.some(v=>v.id===e.id))).map(e=>({planet:p,event:e})))[0];
   if(first){app.view.planet=first.planet.id;app.view.chapter=first.event.parentChapter||'';app.view.selected=first.event.id;app.scroll={left:Math.max(0,first.event.x*app.view.zoom-100),top:Math.max(0,first.event.y*app.view.zoom-100)};}
@@ -205,12 +237,12 @@ export function manageLinkedGMA(app){
  const data=structuredClone(app.data),base=data.revision,records=linkedNotes(data);
  if(!records.length)throw Error('No imported notes are linked yet.');
  const rows=records.map(({planet,event})=>({eventId:event.id,include:false,planetId:planet.id,chapterId:event.parentChapter||'',x:event.x,y:event.y}));
- const {form,close}=app.modal('Linked GM Assistant notes',`<p>This list shows where each linked note is actually saved. Locate opens that note and centers the timeline, including notes inside chapters or off-screen.</p>${field('filter','Filter linked notes','')}<div class="fa-two-col">${selectField('bulkWorld','Move selected notes to world',app.planet.id,data.planets.map(p=>[p.id,p.name]))}${selectField('bulkChapter','Move selected notes to chapter','',chapters(app.planet))}</div><div class="fa-inline-buttons">${button('select-visible','Select visible notes')}${button('select-none','Clear selection')}${button('move-selected','Apply world/chapter to selected notes')}</div><p class="fa-muted">Changes are saved only when you click Save. Moving preserves the existing note, images, classification, and GM Assistant link. Connections that cross the new world or chapter boundary are removed.</p><div class="fa-gma-rows"></div>`,async()=>{
+ const {form,close}=app.modal('Linked GM Assistant notes',`<p>This list shows where each linked note is actually saved. Locate opens that note and centers the timeline, including notes inside chapters or off-screen.</p>${field('filter','Filter linked notes','')}<div class="fa-two-col">${selectField('bulkWorld','Move selected notes to world',app.planet.id,data.planets.map(p=>[p.id,p.name]))}${selectField('bulkChapter','Move selected notes to chapter','',chapters(app.planet))}</div><div class="fa-inline-buttons">${button('select-visible','Select visible notes')}${button('select-none','Clear selection')}${button('move-selected','Apply world/chapter to selected notes')}</div><label><input name="separateOverlaps" type="checkbox" checked> Separate overlapping notes automatically</label><p class="fa-muted">Changes are saved only when you click Save. Moving preserves the existing note, images, classification, and GM Assistant link. Connections that cross the new world or chapter boundary are removed.</p><div class="fa-gma-rows"></div>`,async()=>{
   capturePlacementRows(form.querySelector('.fa-gma-rows'),rows);
   if(!rows.some(row=>row.include))throw Error('Select the notes to move or edit a destination first.');
-  const result=moveLinkedNotes(data,rows);await app.save(result.data,base);
+  const result=moveLinkedNotes(data,rows,{separateOverlaps:form.elements.separateOverlaps.checked});await app.save(result.data,base);
   const first=rows.find(row=>row.include);if(first)await app.focusEvent(first.eventId);
-  ui.notifications.info(`Updated placement for ${result.moved} linked note(s).`);
+  ui.notifications.info(`Updated placement for ${result.moved} linked note(s).${result.separated?` Separated ${result.separated} overlapping note(s).`:""}`);
  });
  form.noValidate=true;
  const draw=()=>{

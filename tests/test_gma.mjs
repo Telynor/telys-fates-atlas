@@ -45,3 +45,17 @@ assert.equal(relocated.data.planets[0].events[0].parents.includes(a.id),false);a
 const together=moveLinkedNotes(multi,[a,b].map((e,i)=>({eventId:e.id,include:true,planetId:other.id,chapterId:'',x:260+i*330,y:240})));
 assert(together.data.planets[1].events[1].parents.includes(a.id));assert.throws(()=>moveLinkedNotes(multi,[{eventId:a.id,include:true,planetId:'missing',x:260,y:240}]),/destination/);
 console.log('PASS: linked-note relocation preserves IDs, source links, prose and artwork; cross-world connections are cleaned, group connections retained.');
+
+const {openCompanion,COMPANION_LAUNCH_URI}=await import('../scripts/gmassistant.js');
+assert.equal(COMPANION_LAUNCH_URI,'tely-fates-atlas://open-companion');
+let launchCount=0;const launchStatus={textContent:''};
+globalThis.fetch=async(url,opts)=>{assert(url.endsWith('/open'));assert.equal(opts.method,'POST');assert.equal(opts.headers['X-Atlas-Token'],'pairing-token');return new Response(JSON.stringify({ok:true,opened:true}),{status:200});};
+assert.equal(await openCompanion({url:'http://127.0.0.1:43127',token:'pairing-token'},launchStatus,()=>launchCount++),'running');assert.equal(launchCount,0);
+globalThis.fetch=async()=>{throw Error('closed');};
+assert.equal(await openCompanion({url:'http://127.0.0.1:43127',token:'pairing-token'},launchStatus,()=>launchCount++),'launch');assert.equal(launchCount,1);assert(launchStatus.textContent.includes('Enable Atlas launch button'));
+console.log('PASS: Open companion requests a paired setup window and falls back to the fixed Windows launch link.');
+
+const stacked=moveLinkedNotes(multi,[a,b].map(e=>({eventId:e.id,include:true,planetId:other.id,chapterId:'',x:260,y:240})));
+assert.equal(stacked.separated,1);assert.equal(stacked.data.planets[1].events.length,2);assert(stacked.data.planets[1].events[1].x-stacked.data.planets[1].events[0].x>=260);
+const deliberate=moveLinkedNotes(multi,[a,b].map(e=>({eventId:e.id,include:true,planetId:other.id,chapterId:'',x:260,y:240})),{separateOverlaps:false});assert.equal(deliberate.data.planets[1].events[0].x,deliberate.data.planets[1].events[1].x);
+console.log('PASS: moved notes sharing coordinates are separated unless exact overlapping placement is explicitly selected.');

@@ -7,6 +7,8 @@ import re
 import secrets
 import ssl
 import threading
+import sys
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
@@ -17,6 +19,8 @@ ID = r'[A-Za-z0-9_-]{1,128}'
 ROUTE = re.compile(rf'^/v1/campaigns(?:/{ID}(?:/sessions(?:/{ID}(?:/(?:notes|recaps(?:/{ID})?|scenes))?)?)?)?$')
 ALLOWED_QUERY = {'cursor', 'limit', 'sort', 'fields'}
 MAX_BYTES = 12 * 1024 * 1024
+SETUP_TITLE = 'Tely’s Fate’s Atlas — GM Assistant Setup'
+LAUNCH_SCHEME = 'tely-fates-atlas'
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -24,9 +28,10 @@ class NoRedirect(HTTPRedirectHandler):
 
 class Bridge(ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, address, *, api_key, token, origin):
+    def __init__(self, address, *, api_key, token, origin, open_window=None):
         super().__init__(address, Handler)
         self.api_key, self.token, self.origin = api_key, token, origin
+        self.open_window = open_window
         self.opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
     def upstream(self, path):
         request = Request(API_HOST + path, headers={'Authorization': 'Bearer ' + self.api_key, 'Accept': 'application/json'})
@@ -49,7 +54,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Vary', 'Origin')
         if self.headers.get('Origin') == self.server.origin:
             self.send_header('Access-Control-Allow-Origin', self.server.origin)
-            self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
             self.send_header('Access-Control-Allow-Headers', 'X-Atlas-Token')
             self.send_header('Access-Control-Allow-Private-Network', 'true')
             self.send_header('Access-Control-Expose-Headers', 'Retry-After')
@@ -83,10 +88,21 @@ class Handler(BaseHTTPRequestHandler):
         except (URLError, TimeoutError, ValueError):
             return self.send_json(502, {'error': 'Could not read notes from GM Assistant. Check connectivity and try again.'})
     def do_POST(self):
-        self.send_json(405, {'error': 'This companion only reads notes.'})
-    do_PUT = do_POST
-    do_PATCH = do_POST
-    do_DELETE = do_POST
+        if self.path != '/open':
+            return self.send_json(405, {'error': 'This companion only reads notes.'})
+        if not self.permitted_origin():
+            return self.send_json(403, {'error': 'This Foundry origin is not paired.'})
+        if not hmac.compare_digest(self.headers.get('X-Atlas-Token', ''), self.server.token):
+            return self.send_json(401, {'error': 'Pairing token is missing or incorrect.'})
+        if not self.server.open_window:
+            return self.send_json(409, {'error': 'This companion is running in console mode. Use the Windows launcher for its setup window.'})
+        self.server.open_window()
+        return self.send_json(200, {'ok': True, 'opened': True})
+    def reject_write(self):
+        return self.send_json(405, {'error': 'This companion only reads notes.'})
+    do_PUT = reject_write
+    do_PATCH = reject_write
+    do_DELETE = reject_write
 
 def normalize_origin(value):
     p = urlsplit(value.strip())
@@ -94,21 +110,62 @@ def normalize_origin(value):
         raise ValueError('Enter your Foundry browser URL, such as http://localhost:30000 or https://my-foundry.example.')
     return p.scheme + '://' + p.netloc
 
+
+def launcher_command(executable=None, script=None):
+    executable = Path(executable or sys.executable).resolve()
+    script = Path(script or __file__).resolve()
+    pythonw = executable.with_name('pythonw.exe')
+    if pythonw.is_file():
+        executable = pythonw
+    if any(c in str(executable) + str(script) for c in '\r\n"'):
+        raise ValueError('The Python or companion path contains unsupported characters.')
+    # Fixed command: URL payloads are deliberately not interpolated into arguments.
+    return f'"{executable}" "{script}" --gui'
+
+def register_windows_launcher():
+    if sys.platform != 'win32':
+        raise ValueError('The launch button registration is currently available on Windows.')
+    import winreg
+    base = 'Software\\Classes\\' + LAUNCH_SCHEME
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base) as key:
+        winreg.SetValueEx(key, '', 0, winreg.REG_SZ, "URL:Tely's Fate's Atlas Companion")
+        winreg.SetValueEx(key, 'URL Protocol', 0, winreg.REG_SZ, '')
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base + '\\shell\\open\\command') as key:
+        winreg.SetValueEx(key, '', 0, winreg.REG_SZ, launcher_command())
+
+def focus_existing_windows_setup():
+    if sys.platform != 'win32':
+        return False
+    import ctypes
+    from ctypes import wintypes
+    user = ctypes.windll.user32
+    user.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user.FindWindowW.restype = wintypes.HWND
+    user.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user.SetForegroundWindow.argtypes = [wintypes.HWND]
+    hwnd = user.FindWindowW(None, SETUP_TITLE)
+    if not hwnd:
+        return False
+    user.ShowWindow(hwnd, 9)
+    user.SetForegroundWindow(hwnd)
+    return True
+
 class SetupWindow:
     """Editable setup fields and explicit clipboard controls; no console key capture."""
     def __init__(self, root, *, port=43127, origin=''):
         import tkinter as tk
         from tkinter import ttk
         self.root, self.port, self.server = root, port, None
+        self.show_requested = threading.Event()
         self.origin = tk.StringVar(value=origin)
         self.key = tk.StringVar(value=os.environ.get('GMA_API_KEY', ''))
         self.show_key = tk.BooleanVar(value=False)
         self.address = tk.StringVar(value='')
         self.token = tk.StringVar(value='')
         self.status = tk.StringVar(value='Paste your Foundry URL and read API key, then click Start companion.')
-        root.title("Tely’s Fate’s Atlas — GM Assistant Setup")
-        root.geometry('770x480')
-        root.minsize(650, 460)
+        root.title(SETUP_TITLE)
+        root.geometry('770x540')
+        root.minsize(650, 520)
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
         frame = ttk.Frame(root, padding=20)
@@ -138,10 +195,28 @@ class SetupWindow:
         ttk.Entry(frame, textvariable=self.token, state='readonly').grid(row=11, column=0, sticky='ew', pady=4)
         ttk.Button(frame, text='Copy pairing token', command=lambda: self.copy(self.token.get())).grid(row=11, column=1, padx=(8, 0), pady=4)
         ttk.Label(frame, textvariable=self.status, wraplength=700).grid(row=12, column=0, columnspan=2, sticky='w', pady=(12, 0))
+        ttk.Button(frame, text='Enable Atlas launch button (Windows)', command=self.enable_launcher).grid(row=13, column=0, columnspan=2, sticky='w', pady=(12, 0))
+        ttk.Label(frame, text='Enable once to let Open companion in Atlas launch this window. Re-enable if you move this module.', wraplength=700).grid(row=14, column=0, columnspan=2, sticky='w', pady=(5, 0))
+        self.root.after(200, self.check_open_request)
         self.bind_paste(self.origin_entry)
         self.bind_paste(self.key_entry)
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.origin_entry.focus_set()
+
+    def enable_launcher(self):
+        try:
+            register_windows_launcher()
+            self.status.set('Atlas launch button enabled for this Windows user. You can now open this window from the importer.')
+        except (ValueError, OSError) as err:
+            self.status.set(str(err))
+
+    def check_open_request(self):
+        if self.show_requested.is_set():
+            self.show_requested.clear()
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        self.root.after(200, self.check_open_request)
 
     def bind_paste(self, entry):
         import tkinter as tk
@@ -185,7 +260,7 @@ class SetupWindow:
             if not key.startswith('gma_') or any(c.isspace() for c in key):
                 raise ValueError('Paste the complete gma_ API key into the API-key field.')
             token = secrets.token_urlsafe(32)
-            server = Bridge(('127.0.0.1', self.port), api_key=key, token=token, origin=origin)
+            server = Bridge(('127.0.0.1', self.port), api_key=key, token=token, origin=origin, open_window=self.show_requested.set)
         except ValueError as err:
             self.status.set(str(err))
             return
@@ -228,6 +303,8 @@ def main():
     mode.add_argument('--console', action='store_true', help='Use visible console input instead of the window')
     args = parser.parse_args()
     if not args.console:
+        if focus_existing_windows_setup():
+            return
         try:
             import tkinter as tk
         except ImportError as err:

@@ -7,7 +7,7 @@ let atlas;
 const read=()=>structuredClone(game.settings.get(ID,'atlas'));
 export class FatesAtlas extends ApplicationV2 {
  static DEFAULT_OPTIONS={id:ID,tag:'div',classes:['tely-fates-atlas'],window:{title:"Tely’s Fate’s Atlas",resizable:true},position:{width:1240,height:800}};
- constructor(options={}){super(options);this.view={planet:'',chapter:'',selected:'',edit:false,zoom:.85};this.scroll={left:0,top:0};this.busy=false;}
+ constructor(options={}){super(options);this.view={planet:'',chapter:'',selected:'',edit:false,zoom:.85};this.scroll={left:0,top:0};this.busy=false;this.worldViews=new Map();this.needsFrame=false;}
  async _renderHTML(){this.data=validate(read());return renderAtlas(this.data,this.view,game.user.isGM);}
  _replaceHTML(result,content){
   content.innerHTML=result;
@@ -15,7 +15,7 @@ export class FatesAtlas extends ApplicationV2 {
   const p=this.planet;this.root.querySelector('.fa-background').style.opacity=p?.fade??.2;
   this.root.querySelector('.fa-background').style.filter=`grayscale(${p?.grayscale??.8})`;
   const vp=this.root.querySelector('.fa-viewport');vp.scrollLeft=this.scroll.left;vp.scrollTop=this.scroll.top;
-  vp.addEventListener('scroll',()=>{this.scroll={left:vp.scrollLeft,top:vp.scrollTop};},{passive:true});
+  vp.addEventListener('scroll',()=>{if(!vp.isConnected)return;this.scroll={left:vp.scrollLeft,top:vp.scrollTop};},{passive:true});
   this.root.addEventListener('click',event=>this.click(event).catch(err=>{console.error(ID,err);ui.notifications.error(err.message);}));
   this.root.addEventListener('change',e=>{
    if(e.target.name==='planet')this.switchPlanet(e.target.value);
@@ -24,6 +24,7 @@ export class FatesAtlas extends ApplicationV2 {
   this.root.addEventListener('keydown',e=>{if(e.key==='Escape'){if(this.root.querySelector('.fa-modal'))return;if(this.view.selected){e.stopPropagation();this.view.selected='';this.refresh();}}});
   this.root.querySelectorAll('img').forEach(el=>el.addEventListener('error',()=>{el.classList.add('fa-broken');el.alt='Image unavailable';},{once:true}));
   this.bindDrag(vp);
+  if(this.needsFrame){this.needsFrame=false;this.frameTimeline();}
  }
  async _onClose(options){this.dragCleanup?.();return super._onClose(options);}
  get planet(){return this.data.planets.find(p=>p.id===this.view.planet)||[...this.data.planets].sort((a,b)=>a.order-b.order)[0];}
@@ -36,8 +37,29 @@ export class FatesAtlas extends ApplicationV2 {
   this.scroll={left:Math.max(0,event.x*this.view.zoom-100),top:Math.max(0,event.y*this.view.zoom-100)};
   return this.refresh();
  }
- switchPlanet(id){this.view.planet=id;this.view.chapter='';this.view.selected='';this.scroll={left:0,top:0};this.refresh();}
- zoom(value){this.view.zoom=Math.max(.4,Math.min(1.5,value));this.refresh();}
+ switchPlanet(id){
+  this.worldViews.set(this.planet.id,{chapter:this.view.chapter,selected:this.view.selected,zoom:this.view.zoom,scroll:{...this.scroll}});
+  const previous=this.worldViews.get(id);this.view.planet=id;
+  this.view.chapter=previous?.chapter||'';this.view.selected=previous?.selected||'';this.view.zoom=previous?.zoom??this.view.zoom;
+  this.scroll=previous?{...previous.scroll}:{left:0,top:0};this.needsFrame=!previous;return this.refresh();
+ }
+ zoom(value){this.view.zoom=Math.max(.01,Math.min(1.5,value));this.refresh();}
+ frameTimeline(){
+  const p=this.planet,chapter=p?.events.some(e=>e.id===this.view.chapter&&e.kind==='chapter')?this.view.chapter:'';
+  const events=p?.events.filter(e=>(e.parentChapter||'')===chapter)||[];
+  const vp=this.root.querySelector('.fa-viewport'),board=this.root.querySelector('.fa-board'),spacer=this.root.querySelector('.fa-spacer');
+  if(!events.length){vp.scrollLeft=0;vp.scrollTop=0;this.scroll={left:0,top:0};return;}
+  const x=Math.max(0,Math.min(...events.map(e=>e.x))-45),y=Math.max(0,Math.min(...events.map(e=>e.y))-45);
+  const width=Math.max(...events.map(e=>e.x+260))-x+45,height=Math.max(...events.map(e=>e.y+155))-y+45;
+  this.view.zoom=Math.max(.01,Math.min(1.5,(vp.clientWidth-30)/width,(vp.clientHeight-30)/height));
+  board.style.transform=`scale(${this.view.zoom})`;spacer.style.width=`${parseFloat(board.style.width)*this.view.zoom}px`;spacer.style.height=`${parseFloat(board.style.height)*this.view.zoom}px`;
+  this.root.querySelector('[name=zoom]').value=String(this.view.zoom);vp.scrollLeft=x*this.view.zoom;vp.scrollTop=y*this.view.zoom;this.scroll={left:vp.scrollLeft,top:vp.scrollTop};
+ }
+ worldNotes(){
+  const p=this.planet;
+  const {form,close}=this.modal(`All notes — ${p.name}`,`<p>All saved quests in this world, including other chapters and notes outside the current view.</p><div class="fa-world-note-list">${p.events.filter(e=>e.kind!=='chapter').map(e=>`<div class="fa-world-note"><strong>${esc(e.name)}</strong><small>${esc(p.events.find(c=>c.id===e.parentChapter)?.name||'Planet overview')} · X ${e.x}, Y ${e.y}</small>${button('locate-world-note','Open note',`data-id="${esc(e.id)}" aria-label="Open ${esc(e.name)}"`)}</div>`).join('')||'<p>No quest notes in this world yet.</p>'}</div>`,null);
+  form.addEventListener('click',event=>{const b=event.target.closest('[data-cmd=locate-world-note]');if(b){close();this.focusEvent(b.dataset.id).catch(err=>ui.notifications.error(err.message));}});
+ }
  async save(next,base=this.data.revision){
   if(!game.user.isGM)throw Error('Only the GM can edit the atlas.');
   if(this.busy)throw Error('A save is already in progress. Please try again.');
@@ -61,11 +83,8 @@ export class FatesAtlas extends ApplicationV2 {
   if(cmd==='deselect'){this.view.selected='';return this.refresh();}
   if(cmd==='picture')return this.picture(e);
   if(cmd==='zoom-in'||cmd==='zoom-out')return this.zoom(this.view.zoom+(cmd==='zoom-in'?.1:-.1));
-  if(cmd==='fit'){
-   const events=p?.events.filter(e=>(e.parentChapter||'')===(this.view.chapter||''))||[];
-   const vp=this.root.querySelector('.fa-viewport');this.scroll={left:0,top:0};
-   return this.zoom(Math.min(vp.clientWidth/Math.max(1000,...events.map(e=>e.x+320)),vp.clientHeight/Math.max(600,...events.map(e=>e.y+200))));
-  }
+  if(cmd==='fit')return this.frameTimeline();
+  if(cmd==='world-notes')return this.worldNotes();
   if(cmd==='help')return this.modal('How to use Fate’s Atlas',`<p>Choose a planet at the top. Drag the empty timeline to explore and use the slider to zoom. Chapters open their own quest timelines. Select a quest to read its description, then choose Recap or click its picture for the full illustration.</p><p>GM: enable Edit atlas to add worlds and quests, drag cards to position them, and use their pencil buttons to edit. Choose predecessor quests to draw branches. Planet settings control the background’s opacity and grayscale.</p><p>All atlas content is shared with the world’s players. Locked status is a visual marker, not a secrecy or prerequisite rule. Keep spoilers out until you want players to see them.</p>`,null);
   if(!game.user.isGM)return;
   if(cmd==='add-planet'||cmd==='edit-planet')return this.editPlanet(cmd==='edit-planet'?p:null);
