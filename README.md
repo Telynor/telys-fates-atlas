@@ -1,4 +1,4 @@
-# Tely’s Fate’s Atlas — 1.1.1
+# Tely’s Fate’s Atlas — 1.1.2
 
 A system-independent Foundry VTT 14 module, built around the supplied Fate’s Atlas video reference: planet navigation, branching illustrated chapters, chapter-specific quest timelines, a right-hand quest panel, and picture recaps.
 
@@ -58,7 +58,7 @@ This integration uses GM Assistant's official v1 API. It reads existing notes; i
 1. Choose the D&D campaign from the campaign dropdown.
 2. Choose the notes format. **Long-form** combines the canonical full recap, session notes, and detailed scene outline/key events. Recap-only, notes-only, and scene-only formats are available.
 3. Click **Fetch campaign notes**. All sessions are read in GM Assistant's campaign order, including paginated results.
-4. Choose the default world, chapter, saved classification profile, status, first X/Y position, horizontal spacing, and optional title prefix. Click **Apply defaults to selected sessions**.
+4. Choose the default world, chapter, saved classification profile, status, first X/Y position, horizontal spacing, and optional title prefix. Defaults immediately apply to sessions that have not been individually customized. **Apply defaults to all selected sessions** explicitly overwrites selected sessions’ individual placements.
 5. Adjust individual sessions' world, chapter, classification, and X/Y positions where needed. Uncheck sessions you do not want to import. Expand a session's preview to inspect its fetched text.
 6. Click **Save** to create the linked Atlas quest cards. Empty sessions and sessions already linked anywhere in this world’s atlas are skipped. Session cards can be connected consecutively. Large imports wrap onto additional rows when they reach the maximum horizontal coordinate.
 
@@ -76,7 +76,7 @@ Click **Resync** in the atlas toolbar, or **Resync all linked notes** in the imp
 
 Resync preserves the entry's world, chapter, X/Y position, branch connections, classification, quest status, timeline image, and Recap cover. Locally inserted inline images are retained near their named source section. If a section has disappeared, its images move to the end. Clearing the source notes also clears the imported prose while keeping locally inserted images. Source text and titles follow GM Assistant; local prose edits are replaced when the remote notes change. To keep an independent copy, open its quest editor and select **Unlink this quest from GM Assistant**.
 
-Resync does not automatically import newly added sessions: use the importer again to choose their placement. Already linked sessions are skipped. If any source read fails, the batch is left unchanged so you can correct the source/connection and retry. There is no scheduled background sync.
+Resync does not automatically import newly added sessions: use the importer again to choose their placement. Already linked sessions show their actual saved world/chapter and cannot be assigned another destination through the importer. Use **Linked notes** to move them. If any source read fails, the batch is left unchanged so you can correct the source/connection and retry. There is no scheduled background sync.
 
 ### Connection troubleshooting
 
@@ -139,3 +139,15 @@ Target: Foundry VTT 14, ApplicationV2. JavaScript syntax, data validation, neste
 ### Companion input fix (1.1.1)
 
 The Windows launcher now opens a standard setup window instead of hidden terminal input. Close the old terminal before starting the updated launcher. Use Paste API key, Start companion, and Copy pairing token. The optional `--console` mode uses visible input for environments without a graphical desktop. API keys remain in process memory and are cleared when the companion stops.
+
+## Repairing or finding linked imports (1.1.2)
+
+Click **Linked notes** in the atlas toolbar or importer. Every linked session lists its actual saved world, chapter, and X/Y coordinates. **Locate** opens that world and chapter and centers the note, even if it was off-screen.
+
+To repair a misplaced import, change its **World** and **Chapter** in this panel, then click **Save**. Editing a destination automatically selects that note for saving. For a batch, select the notes (or filter and select visible notes), choose the bulk world/chapter, click **Apply world/chapter to selected notes**, then **Save**.
+
+These operations move the original records: their IDs, text, source links, artwork, status, and classifications are retained. Connections between notes moved together are retained when they stay in the same destination scope. Connections that now cross a world or chapter boundary are removed.
+
+The placement wizard now reads each visible row directly on Save and does not require a separate default-application click. Individually customized rows retain their overrides when defaults change. A destination summary shows the import counts for each world before saving; the completion notification also reports the saved counts by world. After import, the first new note is opened in its destination and centered.
+
+Existing notes are never automatically moved based on a guess about which world they belong to. Use Linked notes to review and correct existing placement.

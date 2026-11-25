@@ -35,3 +35,13 @@ const calls=[];globalThis.fetch=async url=>{calls.push(url);const u=new URL(url)
 const client=new GMAClient({url:'http://127.0.0.1:43127',token:'pairing-token'});assert.equal((await client.campaigns()).length,2);assert(calls[1].includes('cursor=next%20token'));
 const doc=await client.document('campaign1',{id:'session1',title:'Title',played_at:'2026-11-25'});assert(doc.body.includes('Full notes here.'));assert(doc.body.includes('Full description.'));assert(doc.body.includes('- A moment'));
 console.log('PASS: GM Assistant API contract, pagination, Markdown safety, image preservation, duplicate imports, source links, resync updates, and preservation of local Atlas settings.');
+// Regression: placing linked notes in different worlds preserves source identity and content.
+const {moveLinkedNotes,linkedNotes}=await import('../scripts/gmassistant.js');
+const multi=structuredClone(stored);const other={id:uid(),name:'Other World',events:[],fade:.2,grayscale:.8};multi.planets.push(other);
+const a=multi.planets[0].events[0],b=multi.planets[0].events[1];
+const relocated=moveLinkedNotes(multi,[{eventId:a.id,include:true,planetId:other.id,chapterId:'',x:1600,y:900}]);
+assert.equal(relocated.moved,1);assert.equal(relocated.data.planets[1].events[0].id,a.id);assert.deepEqual(relocated.data.planets[1].events[0].source,a.source);assert.equal(relocated.data.planets[1].events[0].description,a.description);
+assert.equal(relocated.data.planets[0].events[0].parents.includes(a.id),false);assert.equal(linkedNotes(relocated.data).length,2);assert.equal(multi.planets[1].events.length,0);
+const together=moveLinkedNotes(multi,[a,b].map((e,i)=>({eventId:e.id,include:true,planetId:other.id,chapterId:'',x:260+i*330,y:240})));
+assert(together.data.planets[1].events[1].parents.includes(a.id));assert.throws(()=>moveLinkedNotes(multi,[{eventId:a.id,include:true,planetId:'missing',x:260,y:240}]),/destination/);
+console.log('PASS: linked-note relocation preserves IDs, source links, prose and artwork; cross-world connections are cleaned, group connections retained.');
