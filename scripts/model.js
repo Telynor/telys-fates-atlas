@@ -25,7 +25,7 @@ export function validate(raw) {
   const types = (Array.isArray(raw.types) && raw.types.length ? raw.types : TYPES).slice(0,50).map(t=>({id:id(t.id),name:text(t.name,80),symbol:text(t.symbol,8),icon:mediaPath(t.icon),color:/^#[a-f0-9]{6}$/i.test(t.color)?t.color:'#e8cd85'}));
   const planets=raw.planets.map(p=>{
     if(!Array.isArray(p.events) || p.events.length>2000) throw Error('Invalid planet events (maximum 2000).');
-    const result={id:id(p.id),name:text(p.name,100),subtitle:text(p.subtitle,300),icon:mediaPath(p.icon),background:mediaPath(p.background),fade:number(p.fade,0,1,.2),grayscale:number(p.grayscale,0,1,.8),order:number(p.order,0,10000),events:p.events.map(e=>({id:id(e.id),name:text(e.name,200),chapter:text(e.chapter,100),kind:e.kind==='chapter'?'chapter':'quest',parentChapter:text(e.parentChapter,100),description:text(e.description,20000),thumbnail:mediaPath(e.thumbnail),picture:mediaPath(e.picture),type:types.some(t=>t.id===e.type)?e.type:types[0].id,status:['available','active','complete','locked'].includes(e.status)?e.status:'available',x:number(e.x,40,20000,100),y:number(e.y,90,10000,260),parents:Array.isArray(e.parents)?e.parents.map(v=>text(v,100)).slice(0,100):[]}))};
+    const result={id:id(p.id),name:text(p.name,100),subtitle:text(p.subtitle,300),icon:mediaPath(p.icon),background:mediaPath(p.background),fade:number(p.fade,0,1,.2),grayscale:number(p.grayscale,0,1,.8),order:number(p.order,0,10000),events:p.events.map(e=>({id:id(e.id),name:text(e.name,200),chapter:text(e.chapter,100),kind:e.kind==='chapter'?'chapter':'quest',parentChapter:text(e.parentChapter,100),description:text(e.description,500000),source:cleanSource(e.source),thumbnail:mediaPath(e.thumbnail),picture:mediaPath(e.picture),type:types.some(t=>t.id===e.type)?e.type:types[0].id,status:['available','active','complete','locked'].includes(e.status)?e.status:'available',x:number(e.x,40,20000,100),y:number(e.y,90,10000,260),parents:Array.isArray(e.parents)?e.parents.map(v=>text(v,100)).slice(0,100):[]}))};
     const ids=new Set(result.events.map(e=>e.id));
     result.events.forEach(e=>{if(e.kind==='chapter') e.parentChapter=''; else if(!result.events.some(c=>c.id===e.parentChapter&&c.kind==='chapter')) e.parentChapter='';e.parents=[...new Set(e.parents)].filter(v=>ids.has(v)&&v!==e.id);});
     return result;
@@ -41,4 +41,10 @@ export function demo() {
  const c={...a,id:uid(),name:'A familiar face',chapter:'COMPANION STORY',type:'companion',status:'available',x:670,y:520,parents:[a.id]};
  const e={...a,id:uid(),name:'Beyond the horizon',chapter:'CHAPTER III',status:'available',x:1080,parents:[b.id]};
  p.events=[a,b,c,e];return d;
+}
+
+function cleanSource(source){
+ if(!source||source.service!=='gmassistant')return undefined;
+ if(!/^[A-Za-z0-9_-]{1,128}$/.test(source.campaignId)||!/^[A-Za-z0-9_-]{1,128}$/.test(source.sessionId))throw Error('Invalid GM Assistant source identifiers.');
+ return {service:'gmassistant',campaignId:source.campaignId,sessionId:source.sessionId,format:['longform','recap','notes','scenes'].includes(source.format)?source.format:'longform',hash:text(source.hash,100),prefix:text(source.prefix,200),lastSync:text(source.lastSync,100)};
 }

@@ -1,4 +1,4 @@
-# Tely’s Fate’s Atlas — 1.0.0
+# Tely’s Fate’s Atlas — 1.1.0
 
 A system-independent Foundry VTT 14 module, built around the supplied Fate’s Atlas video reference: planet navigation, branching illustrated chapters, chapter-specific quest timelines, a right-hand quest panel, and picture recaps.
 
@@ -41,11 +41,59 @@ Drag empty space to pan. Scrollbars support longer branches and timelines. Use t
 
 Players can view the atlas. Only GMs can change it. The atlas is shared campaign information: do not enter secret material until it should be visible to players. There are no hidden/private quest records.
 
+## Import from GM Assistant and Resync
+
+This integration uses GM Assistant's official v1 API. It reads existing notes; it never uploads recordings, starts analyses, spends credits, or writes back to GM Assistant.
+
+### One-time connection setup
+
+1. Sign in to [GM Assistant](https://gmassistant.app/) in your normal browser. Open **Account → Developer** and create a **read** API key. The service's documented integration authentication is an API key, not third-party account/password login.
+2. Locate this module's **companion** folder inside `Data/modules/telys-fates-atlas`. On Windows, double-click **Start-Windows.bat**. It requires Python 3.10 or later. On macOS/Linux, run `python3 companion/gma_bridge.py`.
+3. Paste your Foundry browser URL into the companion prompt, then enter the GM Assistant API key in its hidden prompt. The key stays in the companion process and is never stored in the atlas or sent to players. Optionally supply it through the `GMA_API_KEY` environment variable on the companion computer.
+4. Keep the companion window open. In Fate’s Atlas, click **Import from GM Assistant**. Copy the **pairing token** from the companion into that window and click **Connect / Load campaigns**. Allow local-network access if your browser asks.
+5. The pairing token is saved only in this browser's client settings. Restarting the companion creates a new token; pair again after a restart. The companion must run on the computer where the GM's Foundry browser is open, even if the Foundry server is hosted elsewhere.
+
+### Import a campaign
+
+1. Choose the D&D campaign from the campaign dropdown.
+2. Choose the notes format. **Long-form** combines the canonical full recap, session notes, and detailed scene outline/key events. Recap-only, notes-only, and scene-only formats are available.
+3. Click **Fetch campaign notes**. All sessions are read in GM Assistant's campaign order, including paginated results.
+4. Choose the default world, chapter, saved classification profile, status, first X/Y position, horizontal spacing, and optional title prefix. Click **Apply defaults to selected sessions**.
+5. Adjust individual sessions' world, chapter, classification, and X/Y positions where needed. Uncheck sessions you do not want to import. Expand a session's preview to inspect its fetched text.
+6. Click **Save** to create the linked Atlas quest cards. Empty sessions and sessions already linked anywhere in this world’s atlas are skipped. Session cards can be connected consecutively. Large imports wrap onto additional rows when they reach the maximum horizontal coordinate.
+
+The importer does not choose the world or chronology from prose. Your chosen placements are authoritative. New campaign imports become shared Atlas content visible to players; preview them before saving.
+
+### Formatted text and images
+
+Edit a quest to work with **Description / campaign notes (Markdown)**. Headings, paragraphs, bullets, bold, italic, code, and inline image Markdown are displayed as formatted content in both the quest panel and Recap viewer.
+
+Use **Insert image** to select or upload an image through Foundry's file picker at the text cursor. Use **Preview formatting** to see the result. Timeline thumbnails and Recap cover pictures remain separate from inline images. Raw HTML in source notes is escaped.
+
+### Resync
+
+Click **Resync** in the atlas toolbar, or **Resync all linked notes** in the importer, to fetch every linked session again. Changes to remote titles and source text update the matching entries without creating duplicates.
+
+Resync preserves the entry's world, chapter, X/Y position, branch connections, classification, quest status, timeline image, and Recap cover. Locally inserted inline images are retained near their named source section. If a section has disappeared, its images move to the end. Clearing the source notes also clears the imported prose while keeping locally inserted images. Source text and titles follow GM Assistant; local prose edits are replaced when the remote notes change. To keep an independent copy, open its quest editor and select **Unlink this quest from GM Assistant**.
+
+Resync does not automatically import newly added sessions: use the importer again to choose their placement. Already linked sessions are skipped. If any source read fails, the batch is left unchanged so you can correct the source/connection and retry. There is no scheduled background sync.
+
+### Connection troubleshooting
+
+- **Cannot reach companion:** keep its terminal open and use its local address. Browser access to localhost is required.
+- **Origin not paired:** restart the companion with the exact URL used in the GM's Foundry browser, including its port. Origins differ between `localhost` and `127.0.0.1`.
+- **Rejected key:** generate a valid read API key in GM Assistant and restart the companion.
+- **Source deleted:** unlink that quest if you want to retain its old content, then resync the remaining links.
+- **Rate limit:** wait for the displayed Retry-After interval and try again. The module does not immediately retry rate-limited calls.
+- On a machine without Python, install Python 3.10+ from the official Python website first. This release includes companion source and a Windows launcher, not a standalone executable.
+
+Official protocol references: [Developer Quick Start](https://gmassistant.app/docs/api/quick-start/), [Conventions](https://gmassistant.app/docs/api/conventions/), [OpenAPI specification](https://backend.gmassistant.app/v1/openapi.yaml).
+
 ## Backups
 
 In Edit mode, **Export** downloads a JSON backup. **Import** validates and replaces the atlas after its replacement checkbox is checked. Export before replacing or deleting content. Deleting a chapter moves its child quests to the planet overview; deleting a planet deletes its cards.
 
-Backups contain artwork paths, not image bytes. Copy the images separately when moving worlds. World settings store the data, so your normal Foundry world backups also include the atlas.
+Backups include the GM Assistant source links, so imported entries stay linked after a restore. API keys and companion pairing tokens are excluded. Backups contain artwork paths, not image bytes. Copy the images separately when moving worlds. World settings store the data, so your normal Foundry world backups also include the atlas.
 
 ## Macro and API
 
@@ -59,6 +107,8 @@ The included `Open-Fates-Atlas-Macro.js` contains the same launcher.
 
 ```js
 const atlas = game.modules.get('telys-fates-atlas').api;
+await atlas.importFromGMA(); // GM only; opens the import wizard.
+await atlas.resyncGMA();     // GM only; updates linked source notes.
 atlas.open({ planetId: 'PLANET_ID', chapterId: 'CHAPTER_ID' });
 const profiles = atlas.getClassificationProfiles(); // Saved icon/color presets.
 const data = atlas.exportData(); // Returns a copy, not live data.

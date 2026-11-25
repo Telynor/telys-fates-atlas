@@ -1,3 +1,5 @@
+import {renderNotes,imageMarkdown} from './notes.js';
+import {openGMA,resyncGMA} from './gmassistant.js';
 import {ID,TYPES,uid,esc,validate,blank,demo,mediaPath} from './model.js';
 import {renderAtlas,button,img,field,imageField,selectField,symbol} from './view.js';
 const {ApplicationV2}=foundry.applications.api;
@@ -61,6 +63,8 @@ export class FatesAtlas extends ApplicationV2 {
   if(cmd==='add-planet'||cmd==='edit-planet')return this.editPlanet(cmd==='edit-planet'?p:null);
   if(cmd==='add-event'||cmd==='edit-event')return this.editEvent(cmd==='edit-event'?e:null);
   if(cmd==='types')return this.editTypes();
+  if(cmd==='gma-import')return openGMA(this);
+  if(cmd==='gma-resync')return resyncGMA(this);
   if(cmd==='example')return game.modules.get(ID).api.loadExample();
   if(cmd==='export')return this.export();
   if(cmd==='import')return this.import();
@@ -112,8 +116,8 @@ export class FatesAtlas extends ApplicationV2 {
   let newX=Math.round((this.scroll.left/this.view.zoom+160)/10)*10;const newY=Math.round((this.scroll.top/this.view.zoom+240)/10)*10;
   while(scope.some(v=>Math.abs(v.x-newX)<290&&Math.abs(v.y-newY)<180))newX+=330;
   const e=existing?p.events.find(v=>v.id===existing.id):{id:uid(),name:'',chapter:'',kind:'quest',parentChapter:this.view.chapter,description:'',thumbnail:'',picture:'',type:next.types[0].id,status:'available',x:newX,y:newY,parents:[]};
-  const {form,close}=this.modal(existing?'Edit quest / chapter':'Add quest / chapter',`${field('name','Quest / chapter name',e.name,'text','required maxlength="200"')}<div class="fa-two-col">${selectField('kind','Card behavior',e.kind||'quest',[['quest','Quest — show picture and recap'],['chapter','Chapter — open a quest timeline']])}${selectField('parentChapter','Inside chapter',e.parentChapter||'',[['','Planet overview'],...p.events.filter(v=>v.kind==='chapter'&&v.id!==e.id).map(v=>[v.id,v.name])])}</div>${field('chapter','Chapter / subtitle label',e.chapter)}<div class="fa-two-col">${selectField('type','Classification profile',e.type,next.types.map(t=>[t.id,`${t.symbol} ${t.name}`]))}${selectField('status','Status',e.status,[['available','Available'],['active','In progress'],['complete','Completed'],['locked','Locked']])}</div><div class="fa-profile-preview"></div><p class="fa-muted">Classification profiles remember their icon, symbol, and color. Choose one above; no new icon upload is needed for this quest.</p>${imageField('thumbnail','Timeline card image',e.thumbnail)}${imageField('picture','Related picture (Recap image)',e.picture)}<label class="fa-field"><span>Description</span><textarea name="description" rows="5">${esc(e.description)}</textarea></label><div class="fa-two-col">${field('x','Horizontal position',e.x,'number','min="40" max="20000"')}${field('y','Vertical position',e.y,'number','min="90" max="10000"')}</div><fieldset class="fa-parents"><legend>Connect from these preceding cards</legend>${p.events.filter(v=>v.id!==e.id).map(v=>`<label data-scope="${esc(v.parentChapter||'')}"><input type="checkbox" name="parents" value="${esc(v.id)}" ${e.parents.includes(v.id)?'checked':''}> ${esc(v.name)}</label>`).join('')||'<p>No other cards yet.</p>'}</fieldset>`,async fd=>{
-   const values=Object.fromEntries(fd);delete values.parents;
+  const {form,close}=this.modal(existing?'Edit quest / chapter':'Add quest / chapter',`${field('name','Quest / chapter name',e.name,'text','required maxlength="200"')}<div class="fa-two-col">${selectField('kind','Card behavior',e.kind||'quest',[['quest','Quest — show picture and recap'],['chapter','Chapter — open a quest timeline']])}${selectField('parentChapter','Inside chapter',e.parentChapter||'',[['','Planet overview'],...p.events.filter(v=>v.kind==='chapter'&&v.id!==e.id).map(v=>[v.id,v.name])])}</div>${field('chapter','Chapter / subtitle label',e.chapter)}<div class="fa-two-col">${selectField('type','Classification profile',e.type,next.types.map(t=>[t.id,`${t.symbol} ${t.name}`]))}${selectField('status','Status',e.status,[['available','Available'],['active','In progress'],['complete','Completed'],['locked','Locked']])}</div><div class="fa-profile-preview"></div><p class="fa-muted">Classification profiles remember their icon, symbol, and color. Choose one above; no new icon upload is needed for this quest.</p>${imageField('thumbnail','Timeline card image',e.thumbnail)}${imageField('picture','Related picture (Recap image)',e.picture)}<div class="fa-notes-toolbar">${button('note-heading','Heading')}${button('note-bold','Bold')}${button('note-image','Insert image')}${button('note-preview','Preview formatting')}</div><div class="fa-field"><label for="fa-note-editor">Description / campaign notes (Markdown)</label><textarea id="fa-note-editor" name="description" rows="10" maxlength="500000">${esc(e.description)}</textarea></div><div class="fa-notes-preview fa-note-content" hidden></div>${e.source?.service==='gmassistant'?'<p class="fa-muted">Linked to GM Assistant. Resync replaces the source text and title, and keeps inserted images with their sections. Unlink to keep an independent copy.</p><label><input name="unlinkGMA" type="checkbox"> Unlink this quest from GM Assistant</label>':''}<div class="fa-two-col">${field('x','Horizontal position',e.x,'number','min="40" max="20000"')}${field('y','Vertical position',e.y,'number','min="90" max="10000"')}</div><fieldset class="fa-parents"><legend>Connect from these preceding cards</legend>${p.events.filter(v=>v.id!==e.id).map(v=>`<label data-scope="${esc(v.parentChapter||'')}"><input type="checkbox" name="parents" value="${esc(v.id)}" ${e.parents.includes(v.id)?'checked':''}> ${esc(v.name)}</label>`).join('')||'<p>No other cards yet.</p>'}</fieldset>`,async fd=>{
+   const values=Object.fromEntries(fd);delete values.parents;delete values.unlinkGMA;if(fd.get('unlinkGMA'))delete e.source;
    if(values.kind==='chapter')values.parentChapter='';
    if(e.kind==='chapter'&&values.kind!=='chapter'&&p.events.some(v=>v.parentChapter===e.id))throw Error('Move the quests out of this chapter before changing its behavior.');
    const parents=fd.getAll('parents').filter(id=>p.events.some(v=>v.id===id&&(v.parentChapter||'')===values.parentChapter));
@@ -128,6 +132,22 @@ export class FatesAtlas extends ApplicationV2 {
   form.elements.kind.addEventListener('change',update);form.elements.parentChapter.addEventListener('change',update);update();
   const profilePreview=()=>{const t=next.types.find(t=>t.id===form.elements.type.value)||next.types[0];const box=form.querySelector('.fa-profile-preview');box.innerHTML=`<span class="fa-profile-icon">${symbol(t)}</span><strong>${esc(t.name)}</strong><small>Saved classification profile</small>`;box.style.setProperty('--profile-color',t.color);};
   form.elements.type.addEventListener('change',profilePreview);profilePreview();
+  form.addEventListener('click',async event=>{
+   const cmd=event.target.closest('[data-cmd]')?.dataset.cmd;
+   if(!['note-heading','note-bold','note-image','note-preview'].includes(cmd))return;
+   const area=form.elements.description,preview=form.querySelector('.fa-notes-preview');
+   const insert=(value,start=area.selectionStart,end=area.selectionEnd)=>{area.setRangeText(value,start,end,'end');area.dispatchEvent(new Event('input',{bubbles:true}));area.focus();};
+   if(cmd==='note-preview'){preview.hidden=!preview.hidden;preview.innerHTML=renderNotes(area.value);}
+   if(cmd==='note-heading')insert('\n\n## '+(area.value.slice(area.selectionStart,area.selectionEnd)||'Heading')+'\n\n');
+   if(cmd==='note-bold')insert('**'+(area.value.slice(area.selectionStart,area.selectionEnd)||'bold text')+'**');
+   if(cmd==='note-image'){
+    const start=area.selectionStart,end=area.selectionEnd;
+    try{new foundry.applications.apps.FilePicker.implementation({type:'image',callback:path=>insert('\n\n'+imageMarkdown(path)+'\n\n',start,end)}).render({force:true});}
+    catch(err){form.querySelector('.fa-error').textContent=err.message;}
+   }
+  });
+  form.elements.description.addEventListener('input',()=>{const preview=form.querySelector('.fa-notes-preview');if(!preview.hidden)preview.innerHTML=renderNotes(form.elements.description.value);});
+
   form.querySelector('[data-cmd=delete]')?.addEventListener('click',()=>{if(confirm('Delete this card? Quests inside a deleted chapter move to the planet overview.')){
    p.events=p.events.filter(v=>v.id!==e.id);p.events.forEach(v=>{v.parents=v.parents.filter(id=>id!==e.id);if(v.parentChapter===e.id)v.parentChapter='';});
    if(this.view.chapter===e.id)this.view.chapter='';this.save(next,base).then(close).catch(err=>form.querySelector('.fa-error').textContent=err.message);
@@ -144,7 +164,7 @@ export class FatesAtlas extends ApplicationV2 {
  }
  picture(e){
   if(!e)return;const path=mediaPath(e.picture||e.thumbnail);
-  this.modal(e.name,`<div class="fa-picture-view">${img(path,'',e.name)||'<p>Choose a related picture in this quest’s editor.</p>'}</div><p class="fa-description">${esc(e.description)}</p>`,null);
+  this.modal(e.name,`<div class="fa-picture-view">${img(path,'',e.name)||'<p>Choose a related picture in this quest’s editor.</p>'}</div><div class="fa-description fa-note-content">${renderNotes(e.description)}</div>`,null);
   this.root.querySelector('.fa-dialog').classList.add('fa-picture-dialog');
  }
  export(){const blob=new Blob([JSON.stringify(this.data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='telys-fates-atlas-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -178,12 +198,13 @@ export class FatesAtlas extends ApplicationV2 {
 }
 class AtlasMenu extends ApplicationV2{async render(){return game.modules.get(ID).api.open();}}
 Hooks.once('init',()=>{
+ game.settings.register(ID,'gmaConnection',{scope:'client',config:false,type:Object,default:{}});
  game.settings.register(ID,'atlas',{scope:'world',config:false,type:Object,default:blank(),onChange:()=>{if(atlas?.rendered&&!atlas.busy&&!atlas.root?.querySelector('.fa-modal'))atlas.refresh();}});
  game.settings.registerMenu(ID,'open',{name:"Fate’s Atlas",label:'Open Fate’s Atlas',hint:'Open the campaign’s illustrated timeline.',icon:'fas fa-route',type:AtlasMenu,restricted:false});
  game.keybindings.register(ID,'open',{name:'Open Fate’s Atlas',editable:[{key:'KeyF',modifiers:['Shift']}],onDown:()=>{game.modules.get(ID).api.open();return true;}});
 });
 Hooks.once('ready',()=>{
- game.modules.get(ID).api={open:({planetId,chapterId}={})=>{atlas??=new FatesAtlas();if(planetId)atlas.view.planet=planetId;if(chapterId)atlas.view.chapter=chapterId;return atlas.render({force:true});},exportData:()=>read(),getClassificationProfiles:()=>structuredClone(read().types),saveClassificationProfiles:async profiles=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());const next=structuredClone(atlas.data);if(!Array.isArray(profiles)||!profiles.length)throw Error('Provide at least one classification profile.');next.types=profiles.map(p=>({...p,id:p.id||uid()}));return atlas.save(next);},importData:async data=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(validate(data));},loadExample:async()=>{if(!game.user.isGM)throw Error('GM only.');if(read().planets.length)throw Error('Example can only be loaded into an empty atlas.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(demo());}};
+ game.modules.get(ID).api={open:({planetId,chapterId}={})=>{atlas??=new FatesAtlas();if(planetId)atlas.view.planet=planetId;if(chapterId)atlas.view.chapter=chapterId;return atlas.render({force:true});},exportData:()=>read(),importFromGMA:async()=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();await atlas.render({force:true});openGMA(atlas);},resyncGMA:async()=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();await atlas.render({force:true});return resyncGMA(atlas);},getClassificationProfiles:()=>structuredClone(read().types),saveClassificationProfiles:async profiles=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());const next=structuredClone(atlas.data);if(!Array.isArray(profiles)||!profiles.length)throw Error('Provide at least one classification profile.');next.types=profiles.map(p=>({...p,id:p.id||uid()}));return atlas.save(next);},importData:async data=>{if(!game.user.isGM)throw Error('GM only.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(validate(data));},loadExample:async()=>{if(!game.user.isGM)throw Error('GM only.');if(read().planets.length)throw Error('Example can only be loaded into an empty atlas.');atlas??=new FatesAtlas();atlas.data=validate(read());return atlas.save(demo());}};
 });
 Hooks.on('renderSettings',(_app,html)=>{
  const el=html instanceof HTMLElement?html:html?.[0];if(!el||el.querySelector('.tely-atlas-launch'))return;
