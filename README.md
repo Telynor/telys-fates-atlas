@@ -1,4 +1,4 @@
-# Tely’s Fate’s Atlas — 1.1.0
+# Tely’s Fate’s Atlas — 1.1.1
 
 A system-independent Foundry VTT 14 module, built around the supplied Fate’s Atlas video reference: planet navigation, branching illustrated chapters, chapter-specific quest timelines, a right-hand quest panel, and picture recaps.
 
@@ -49,8 +49,8 @@ This integration uses GM Assistant's official v1 API. It reads existing notes; i
 
 1. Sign in to [GM Assistant](https://gmassistant.app/) in your normal browser. Open **Account → Developer** and create a **read** API key. The service's documented integration authentication is an API key, not third-party account/password login.
 2. Locate this module's **companion** folder inside `Data/modules/telys-fates-atlas`. On Windows, double-click **Start-Windows.bat**. It requires Python 3.10 or later. On macOS/Linux, run `python3 companion/gma_bridge.py`.
-3. Paste your Foundry browser URL into the companion prompt, then enter the GM Assistant API key in its hidden prompt. The key stays in the companion process and is never stored in the atlas or sent to players. Optionally supply it through the `GMA_API_KEY` environment variable on the companion computer.
-4. Keep the companion window open. In Fate’s Atlas, click **Import from GM Assistant**. Copy the **pairing token** from the companion into that window and click **Connect / Load campaigns**. Allow local-network access if your browser asks.
+3. In the companion setup window, paste your Foundry browser URL into **Foundry URL** and paste the API key into **GM Assistant read API key**. Both fields have Paste buttons; the key field displays asterisks and has a Show API key checkbox. Click **Start companion**. The key stays in the companion process and is never stored in the atlas or sent to players. Optionally supply it through the `GMA_API_KEY` environment variable on the companion computer.
+4. Keep the companion setup window open. In Fate’s Atlas, click **Import from GM Assistant**. Click **Copy pairing token** in the companion and paste it into the importer and click **Connect / Load campaigns**. Allow local-network access if your browser asks.
 5. The pairing token is saved only in this browser's client settings. Restarting the companion creates a new token; pair again after a restart. The companion must run on the computer where the GM's Foundry browser is open, even if the Foundry server is hosted elsewhere.
 
 ### Import a campaign
@@ -80,7 +80,7 @@ Resync does not automatically import newly added sessions: use the importer agai
 
 ### Connection troubleshooting
 
-- **Cannot reach companion:** keep its terminal open and use its local address. Browser access to localhost is required.
+- **Cannot reach companion:** keep its setup window open and use its local address. Browser access to localhost is required.
 - **Origin not paired:** restart the companion with the exact URL used in the GM's Foundry browser, including its port. Origins differ between `localhost` and `127.0.0.1`.
 - **Rejected key:** generate a valid read API key in GM Assistant and restart the companion.
 - **Source deleted:** unlink that quest if you want to retain its old content, then resync the remaining links.
@@ -135,3 +135,7 @@ Profiles are stored with the world and included in JSON backups. Their icon path
 This version implements the reference’s planet → chapter → quest organization, card frames, branching lines, zoom controls, selection brackets, quest panel, and recap navigation using original HTML/CSS. It uses still images for recaps as requested. It does not replay Star Rail gameplay, video cutscenes, or dialogue choices, and it does not include the game’s proprietary icons, fonts, or backgrounds. It is not a pixel-for-pixel copy of the game engine UI.
 
 Target: Foundry VTT 14, ApplicationV2. JavaScript syntax, data validation, nested timeline rendering, safe image paths, and escaped user content have automated checks. See VALIDATION.md for the final test results and runtime limits.
+
+### Companion input fix (1.1.1)
+
+The Windows launcher now opens a standard setup window instead of hidden terminal input. Close the old terminal before starting the updated launcher. Use Paste API key, Start companion, and Copy pairing token. The optional `--console` mode uses visible input for environments without a graphical desktop. API keys remain in process memory and are cleared when the companion stops.

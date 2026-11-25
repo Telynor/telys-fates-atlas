@@ -36,3 +36,7 @@ Additional automated coverage includes:
 - Browser integration workflow with a mock GM Assistant API: connection, campaign selection, full-note fetching, per-session world/chapter/position selection, classification selection, image insertion and preview, resync, and atomic failure handling.
 
 Run `node tests/test_model.mjs`, `node tests/test_gma.mjs`, and `python3 tests/test_bridge.py` from the repository. Foundry's native file picker and a live GM Assistant account still require end-to-end verification on the user's installation.
+
+## 1.1.1 — companion input fix
+
+Replaced hidden console input with a Tk setup window, explicit clipboard buttons, a visible-editable masked key field, optional key reveal, and copyable pairing details. Automated setup-controller tests cover clipboard replacement, validation, starting the real loopback service, authenticated status reads, copying the token, stopping, and clearing credentials. These controller tests use mock widgets; a native Windows desktop check remains pending. Existing companion boundary tests also pass.

@@ -2,7 +2,7 @@
   "id": "telys-fates-atlas",
   "title": "Tely's Fate's Atlas",
   "description": "Planet-based branching quest timelines, reusable classifications, illustrated notes, and linked GM Assistant campaign imports with Resync.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "authors": [
     {
       "name": "Telynor"
@@ -20,6 +20,6 @@
   ],
   "url": "https://github.com/Telynor/telys-fates-atlas",
   "manifest": "https://raw.githubusercontent.com/Telynor/telys-fates-atlas/main/module.json",
-  "download": "https://github.com/Telynor/telys-fates-atlas/archive/refs/tags/v1.1.0.zip",
+  "download": "https://github.com/Telynor/telys-fates-atlas/archive/refs/tags/v1.1.1.zip",
   "bugs": "https://github.com/Telynor/telys-fates-atlas/issues"
 }
